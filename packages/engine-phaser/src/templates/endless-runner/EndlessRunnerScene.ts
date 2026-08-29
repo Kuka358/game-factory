@@ -26,6 +26,12 @@ const COLLECTIBLE_SCORE_BONUS =
 const COLLECTIBLE_SPAWN_INTERVAL_MS =
     2200;
 
+const ENEMY_ROLE =
+    "enemy";
+
+const ENEMY_SPAWN_EVERY =
+    3;
+
 export class EndlessRunnerScene
     extends Phaser.Scene
 {
@@ -55,6 +61,7 @@ export class EndlessRunnerScene
     private distance = 0;
 
     private collectibleBonusScore = 0;
+    private hazardSpawnCount = 0;
 
     // Geometry
 
@@ -104,6 +111,9 @@ export class EndlessRunnerScene
         this.distance = 0;
 
         this.collectibleBonusScore =
+            0;
+
+        this.hazardSpawnCount =
             0;
 
         this.createBackground(
@@ -352,9 +362,14 @@ export class EndlessRunnerScene
 
                     entities: {
                         obstacle:
-                            this.obstacles
-                                .getChildren()
-                                .length,
+                            this.countHazardsByRole(
+                                "obstacle"
+                            ),
+
+                        enemy:
+                            this.countHazardsByRole(
+                                ENEMY_ROLE
+                            ),
 
                         collectible:
                             this.collectibles
@@ -497,10 +512,38 @@ export class EndlessRunnerScene
         );
     }
 
-    private spawnObstacle(): void {
-        if (this.gameOver) {
+    private spawnObstacle():
+        void
+    {
+        if (
+            this.gameOver
+        ) {
             return;
         }
+
+        this.hazardSpawnCount +=
+            1;
+
+        /*
+        * If the template has an enemy asset, every third
+        * hazard becomes an NPC enemy instead of the normal
+        * obstacle.
+        *
+        * This keeps the existing spawn interval and avoids
+        * creating two independent hazard timelines.
+        */
+        const spawnEnemy =
+            this.assets.has(
+                ENEMY_ROLE
+            ) &&
+            this.hazardSpawnCount %
+                ENEMY_SPAWN_EVERY ===
+                0;
+
+        const assetRole =
+            spawnEnemy
+                ? ENEMY_ROLE
+                : "obstacle";
 
         const obstacle =
             this.physics.add.image(
@@ -510,15 +553,25 @@ export class EndlessRunnerScene
                 0,
 
                 this.assets.getTextureKey(
-                    "obstacle"
+                    assetRole
                 )
             );
 
-        this.fitImageToBox(
-            obstacle,
-            52,
-            64
-        );
+        if (
+            spawnEnemy
+        ) {
+            this.fitImageToBox(
+                obstacle,
+                56,
+                64
+            );
+        } else {
+            this.fitImageToBox(
+                obstacle,
+                52,
+                64
+            );
+        }
 
         obstacle.setPosition(
             this.scale.width +
@@ -541,12 +594,29 @@ export class EndlessRunnerScene
             this.configureBody(
                 obstacle,
 
-                0.78,
-                0.82
+                spawnEnemy
+                    ? 0.68
+                    : 0.78,
+
+                spawnEnemy
+                    ? 0.88
+                    : 0.82
             );
 
         body.setAllowGravity(
             false
+        );
+
+        /*
+        * Enemy and normal obstacle deliberately share the
+        * same hazard group.
+        *
+        * Existing collision/game-over handling therefore
+        * works without a second physics system.
+        */
+        obstacle.setData(
+            "hazardRole",
+            assetRole
         );
 
         this.obstacles.add(
@@ -817,6 +887,37 @@ export class EndlessRunnerScene
                 collectible.destroy();
             }
         }
+    }
+
+    private countHazardsByRole(
+        role:
+            string
+    ): number {
+        let count =
+            0;
+
+        for (
+            const child of
+            this.obstacles
+                .getChildren()
+        ) {
+            const hazard =
+                child as
+                    Phaser.Physics.Arcade.Image;
+
+            if (
+                hazard.active &&
+                hazard.getData(
+                    "hazardRole"
+                ) ===
+                    role
+            ) {
+                count +=
+                    1;
+            }
+        }
+
+        return count;
     }
 
     private fitImageToBox(

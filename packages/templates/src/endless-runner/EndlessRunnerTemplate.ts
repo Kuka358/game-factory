@@ -45,6 +45,28 @@ const manifest: TemplateManifest = {
                 ),
 
             required:
+                false,
+        },
+
+        {
+            role:
+                "enemy",
+
+            profile:
+                "npc",
+
+            description:
+                [
+                    "Optional enemy NPC used as a moving hazard.",
+                    "The enemy replaces some normal obstacles during gameplay.",
+                    "Collision with the enemy causes game over.",
+                    "Use it when the requested game explicitly involves",
+                    "enemies, monsters, guards, bandits, robots or similar hostile characters."
+                ].join(
+                    " "
+                ),
+
+            required:
                 false
         }
     ]
