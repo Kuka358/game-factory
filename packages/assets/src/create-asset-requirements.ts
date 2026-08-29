@@ -1,6 +1,6 @@
 import type {
     AssetRequirement
-} from "@game-factory/assets";
+} from "./AssetRequirement.js";
 
 import type {
     AdditionalAssetSpec,

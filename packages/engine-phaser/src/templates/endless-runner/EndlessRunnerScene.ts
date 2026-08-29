@@ -17,6 +17,15 @@ import type {
     PhaserAssetRegistry
 } from "../../assets/PhaserAssetRegistry.js";
 
+const COLLECTIBLE_ROLE =
+    "collectible";
+
+const COLLECTIBLE_SCORE_BONUS =
+    10;
+
+const COLLECTIBLE_SPAWN_INTERVAL_MS =
+    2200;
+
 export class EndlessRunnerScene
     extends Phaser.Scene
 {
@@ -45,6 +54,8 @@ export class EndlessRunnerScene
     private currentWorldSpeed = 0;
     private distance = 0;
 
+    private collectibleBonusScore = 0;
+
     // Geometry
 
     private groundTop = 0;
@@ -61,6 +72,9 @@ export class EndlessRunnerScene
         Phaser.Physics.Arcade.Image;
 
     private obstacles!:
+        Phaser.GameObjects.Group;
+
+    private collectibles?:
         Phaser.GameObjects.Group;
 
     preload(): void {
@@ -89,6 +103,9 @@ export class EndlessRunnerScene
 
         this.distance = 0;
 
+        this.collectibleBonusScore =
+            0;
+
         this.createBackground(
             width,
             height
@@ -104,6 +121,15 @@ export class EndlessRunnerScene
         this.obstacles =
             this.add.group();
 
+        if (
+            this.assets.has(
+                COLLECTIBLE_ROLE
+            )
+        ) {
+            this.collectibles =
+                this.add.group();
+        }
+
         this.createColliders();
 
         const unregisterDebugState =
@@ -117,6 +143,8 @@ export class EndlessRunnerScene
         this.ctx.score.reset();
 
         this.createObstacleTimer();
+
+        this.createCollectibleTimer();
 
         this.events.once(
             Phaser.Scenes.Events.SHUTDOWN,
@@ -167,6 +195,7 @@ export class EndlessRunnerScene
         );
 
         this.updateObstacleSpeeds();
+        this.updateCollectibleSpeeds();
     }
 
     private createBackground(
@@ -273,7 +302,27 @@ export class EndlessRunnerScene
                 this.handleGameOver();
             }
         );
+
+        if (
+            this.collectibles
+        ) {
+            this.physics.add.overlap(
+                this.player,
+                this.collectibles,
+                (
+                    _player,
+                    collectible
+                ) => {
+                    this.collectCollectible(
+                        collectible as
+                            Phaser.Physics.Arcade.Image
+                    );
+                }
+            );
+        }
     }
+
+
 
     private registerDebugState():
         () => void
@@ -305,7 +354,13 @@ export class EndlessRunnerScene
                         obstacle:
                             this.obstacles
                                 .getChildren()
-                                .length
+                                .length,
+
+                        collectible:
+                            this.collectibles
+                                ?.getChildren()
+                                .length ??
+                            0
                     },
 
                     game_over:
@@ -357,6 +412,29 @@ export class EndlessRunnerScene
             callback: () => {
                 this.spawnObstacle();
             },
+
+            loop:
+                true
+        });
+    }
+
+    private createCollectibleTimer():
+        void
+    {
+        if (
+            !this.collectibles
+        ) {
+            return;
+        }
+
+        this.time.addEvent({
+            delay:
+                COLLECTIBLE_SPAWN_INTERVAL_MS,
+
+            callback:
+                () => {
+                    this.spawnCollectible();
+                },
 
             loop:
                 true
@@ -476,6 +554,121 @@ export class EndlessRunnerScene
         );
     }
 
+    private spawnCollectible():
+        void
+    {
+        if (
+            this.gameOver ||
+            !this.collectibles
+        ) {
+            return;
+        }
+
+        const collectible =
+            this.physics.add.image(
+                this.scale.width +
+                    40,
+
+                0,
+
+                this.assets.getTextureKey(
+                    COLLECTIBLE_ROLE
+                )
+            );
+
+        this.fitImageToBox(
+            collectible,
+            36,
+            36
+        );
+
+        const minimumY =
+            Math.max(
+                48,
+                this.groundTop -
+                    150
+            );
+
+        const maximumY =
+            Math.max(
+                minimumY,
+                this.groundTop -
+                    70
+            );
+
+        const y =
+            Phaser.Math.Between(
+                Math.round(
+                    minimumY
+                ),
+
+                Math.round(
+                    maximumY
+                )
+            );
+
+        collectible.setPosition(
+            this.scale.width +
+                40,
+
+            y
+        );
+
+        collectible
+            .setImmovable(
+                true
+            )
+            .setVelocityX(
+                -this.currentWorldSpeed
+            );
+
+        const body =
+            this.configureBody(
+                collectible,
+                0.75,
+                0.75
+            );
+
+        body.setAllowGravity(
+            false
+        );
+
+        this.collectibles.add(
+            collectible
+        );
+    }
+
+    private collectCollectible(
+        collectible:
+            Phaser.Physics.Arcade.Image
+    ): void {
+        if (
+            !collectible.active ||
+            this.gameOver
+        ) {
+            return;
+        }
+
+        collectible.disableBody(
+            true,
+            true
+        );
+
+        this.collectibleBonusScore +=
+            COLLECTIBLE_SCORE_BONUS;
+
+        const distanceScore =
+            Math.floor(
+                this.distance /
+                    10
+            );
+
+        this.ctx.score.set(
+            distanceScore +
+            this.collectibleBonusScore
+        );
+    }
+
     private handleGameOver():
         void
     {
@@ -558,14 +751,15 @@ export class EndlessRunnerScene
             this.currentWorldSpeed *
             deltaSeconds;
 
-        const score =
+        const distanceScore =
             Math.floor(
                 this.distance /
                 10
             );
 
         this.ctx.score.set(
-            score
+            distanceScore +
+            this.collectibleBonusScore
         );
     }
 
@@ -590,6 +784,37 @@ export class EndlessRunnerScene
                 -100
             ) {
                 obstacle.destroy();
+            }
+        }
+    }
+
+    private updateCollectibleSpeeds():
+        void
+    {
+        if (
+            !this.collectibles
+        ) {
+            return;
+        }
+
+        for (
+            const child of
+            this.collectibles
+                .getChildren()
+        ) {
+            const collectible =
+                child as
+                    Phaser.Physics.Arcade.Image;
+
+            collectible.setVelocityX(
+                -this.currentWorldSpeed
+            );
+
+            if (
+                collectible.x <
+                -100
+            ) {
+                collectible.destroy();
             }
         }
     }

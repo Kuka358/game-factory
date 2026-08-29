@@ -121,8 +121,7 @@ export async function runGenerationPipeline(
 
     const assetRequirements =
         createAssetRequirements(
-            spec,
-            template.manifest
+            spec
         );
 
     const assetManager =

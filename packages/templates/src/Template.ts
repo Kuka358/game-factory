@@ -47,7 +47,7 @@ export type TemplateId =
 
 export interface TemplateManifest {
     id:
-        string;
+        TemplateId;
 
     version:
         string;
