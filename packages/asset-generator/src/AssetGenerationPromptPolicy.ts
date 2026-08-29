@@ -178,12 +178,14 @@ export function applyAssetGenerationProfilePolicy(
 
             break;
 
-        case "ui":
+        case "ui": {
             positive.push(
                 [
-                    "Single clean game UI element.",
-                    "Readable shape.",
-                    "Centered interface asset."
+                    "Generate exactly one standalone game UI element.",
+                    "Single isolated interface asset.",
+                    "Clean readable silhouette.",
+                    "No complete HUD or UI kit.",
+                    "No text unless explicitly requested."
                 ].join(
                     " "
                 )
@@ -196,13 +198,106 @@ export function applyAssetGenerationProfilePolicy(
                     "character",
                     "sprite sheet",
                     "multiple UI variants",
-                    "UI collection"
+                    "UI collection",
+                    "UI kit",
+                    "full HUD",
+                    "full menu",
+                    "interface mockup"
                 ].join(
                     ", "
                 )
             );
 
+            switch (
+                request.uiKind
+            ) {
+                case "icon":
+                    positive.push(
+                        [
+                            "Create exactly one compact square game icon.",
+                            "Show one clear visual symbol only.",
+                            "Keep the symbol centered.",
+                            "High readability at very small resolution.",
+                            "Transparent background."
+                        ].join(
+                            " "
+                        )
+                    );
+
+                    negative.push(
+                        [
+                            "multiple icons",
+                            "icon sheet",
+                            "icon set",
+                            "text",
+                            "numbers",
+                            "button",
+                            "panel"
+                        ].join(
+                            ", "
+                        )
+                    );
+
+                    break;
+
+                case "button":
+                    positive.push(
+                        [
+                            "Create exactly one horizontal game button.",
+                            "Leave the center visually clean for runtime text.",
+                            "Do not render text into the button."
+                        ].join(
+                            " "
+                        )
+                    );
+
+                    break;
+
+                case "panel":
+                    positive.push(
+                        [
+                            "Create exactly one rectangular game UI panel.",
+                            "Use a decorative border.",
+                            "Keep a large clean interior area."
+                        ].join(
+                            " "
+                        )
+                    );
+
+                    break;
+
+                case "frame":
+                    positive.push(
+                        [
+                            "Create exactly one decorative UI frame.",
+                            "Keep the center empty and transparent.",
+                            "Decoration belongs primarily on the border."
+                        ].join(
+                            " "
+                        )
+                    );
+
+                    break;
+
+                case "bar":
+                    positive.push(
+                        [
+                            "Create exactly one horizontal game status bar.",
+                            "Long rectangular shape.",
+                            "Clean outer border and inner fill region."
+                        ].join(
+                            " "
+                        )
+                    );
+
+                    break;
+
+                default:
+                    break;
+            }
+
             break;
+        }
 
         case "tileset": {
             positive.push(

@@ -227,11 +227,68 @@ export class AssetGenerator {
                         attempt
                     );
 
-            const generated =
-                await this.generateAttempt(
-                    attemptRequest,
-                    attemptPrompt
+            let generated:
+                AssetGenerationAttemptResult;
+
+            try {
+                generated =
+                    await this.generateAttempt(
+                        attemptRequest,
+                        attemptPrompt
+                    );
+            } catch (
+                error
+            ) {
+                const message =
+                    error instanceof Error
+                        ? error.message
+                        : String(
+                            error
+                        );
+
+                console.warn(
+                    [
+                        `[asset-generator] processing failed for "${normalizedRequest.role}"`,
+                        `profile=${normalizedRequest.profile}`,
+                        `attempt=${attempt}`,
+                        message
+                    ].join(
+                        " "
+                    )
                 );
+
+                if (
+                    attempt <
+                    this.maxAttempts
+                ) {
+                    console.warn(
+                        [
+                            `[asset-generator] retrying "${normalizedRequest.role}"`,
+                            `with seed=${deriveRetrySeed(
+                                normalizedRequest.seed,
+                                attempt + 1
+                            )}`
+                        ].join(
+                            " "
+                        )
+                    );
+
+                    continue;
+                }
+
+                throw new Error(
+                    [
+                        `Generated asset "${normalizedRequest.role}" failed processing after ${this.maxAttempts} attempts.`,
+                        message
+                    ].join(
+                        "\n"
+                    ),
+                    {
+                        cause:
+                            error
+                    }
+                );
+            }
 
             /*
              * Cached assets are intentionally validated too.

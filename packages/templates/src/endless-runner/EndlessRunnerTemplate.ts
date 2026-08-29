@@ -68,6 +68,30 @@ const manifest: TemplateManifest = {
 
             required:
                 false
+        },
+
+        {
+            role:
+                "score_icon",
+
+            profile:
+                "ui",
+
+            description:
+                [
+                    "Optional decorative icon displayed next to the score counter.",
+                    "Use it only when the requested game explicitly asks for",
+                    "a themed score, points, coin, star or collectible icon in the HUD."
+                ].join(
+                    " "
+                ),
+
+            required:
+                false,
+
+            uiKinds: [
+                "icon"
+            ]
         }
     ]
 };

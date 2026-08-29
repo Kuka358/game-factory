@@ -20,6 +20,9 @@ import type {
 const COLLECTIBLE_ROLE =
     "collectible";
 
+const SCORE_ICON_ROLE =
+    "score_icon";
+
 const COLLECTIBLE_SCORE_BONUS =
     10;
 
@@ -71,6 +74,9 @@ export class EndlessRunnerScene
 
     private scoreText!:
         Phaser.GameObjects.Text;
+
+    private scoreIcon?:
+        Phaser.GameObjects.Image;
 
     private ground!:
         Phaser.GameObjects.Rectangle;
@@ -384,12 +390,53 @@ export class EndlessRunnerScene
             );
     }
 
-    private createScoreHud(): void {
+    private createScoreHud():
+        void
+    {
+        let scoreTextX =
+            24;
+
+        if (
+            this.assets.has(
+                SCORE_ICON_ROLE
+            )
+        ) {
+            this.scoreIcon =
+                this.add.image(
+                    24,
+                    38,
+
+                    this.assets.getTextureKey(
+                        SCORE_ICON_ROLE
+                    )
+                );
+
+            this.fitImageToBox(
+                this.scoreIcon,
+                32,
+                32
+            );
+
+            this.scoreIcon
+                .setOrigin(
+                    0,
+                    0.5
+                )
+                .setDepth(
+                    1000
+                );
+
+            scoreTextX =
+                68;
+        }
+
         this.scoreText =
             this.add.text(
+                scoreTextX,
                 24,
-                24,
+
                 "Score: 0",
+
                 {
                     fontSize:
                         "28px",
@@ -398,6 +445,10 @@ export class EndlessRunnerScene
                         "#ffffff"
                 }
             );
+
+        this.scoreText.setDepth(
+            1000
+        );
     }
 
     private registerScoreEvents():
@@ -922,7 +973,7 @@ export class EndlessRunnerScene
 
     private fitImageToBox(
         image:
-            Phaser.Physics.Arcade.Image,
+            Phaser.GameObjects.Image,
 
         maxWidth:
             number,
