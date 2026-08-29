@@ -1,0 +1,29 @@
+{
+  "name": "@game-factory/qa",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+
+    "serve:build": "tsx src/serve-build.ts",
+    "qa": "tsx src/run-qa.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1",
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12"
+  },
+  "dependencies": {
+    "@game-factory/engine-phaser": "workspace:*",
+    "@game-factory/runtime": "workspace:*"
+  }
+}

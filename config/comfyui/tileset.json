@@ -1,0 +1,126 @@
+{
+  "2": {
+    "inputs": {
+      "ckpt_name": "sd_xl_base_1.0.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "3": {
+    "inputs": {
+      "text": "__GF_PROMPT__, pixel art game tileset, regular uniform tile grid, consistent tile size, seamless game environment tiles, clean tile boundaries, reusable modular terrain pieces, consistent lighting and palette, orthographic 2D game art, tiles align cleanly with neighboring tiles, no isolated character, no UI, no text, no labels",
+      "clip": [
+        "11",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive)"
+    }
+  },
+  "4": {
+    "inputs": {
+      "text": "__GF_NEGATIVE_PROMPT__, irregular grid, inconsistent tile sizes, perspective distortion, isometric perspective unless explicitly requested, random spacing, overlapping tiles, broken tile boundaries, photographic texture, realistic photo, character sheet, characters, people, creatures, inventory items, UI, HUD, menu, button, text, letters, numbers, labels, logo, watermark, frame, border, mockup",
+      "clip": [
+        "11",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative)"
+    }
+  },
+  "5": {
+    "inputs": {
+      "width": "__GF_WIDTH__",
+      "height": "__GF_HEIGHT__",
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "6": {
+    "inputs": {
+      "seed": "__GF_SEED__",
+      "steps": 35,
+      "cfg": 5.5,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 1,
+      "model": [
+        "11",
+        0
+      ],
+      "positive": [
+        "3",
+        0
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "latent_image": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "7": {
+    "inputs": {
+      "samples": [
+        "6",
+        0
+      ],
+      "vae": [
+        "2",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "11": {
+    "inputs": {
+      "lora_name": "pixel-art-xl.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
+      "model": [
+        "2",
+        0
+      ],
+      "clip": [
+        "2",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA (Model and CLIP)"
+    }
+  },
+  "8": {
+    "inputs": {
+      "filename_prefix": "__GF_FILENAME_PREFIX__",
+      "images": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Tileset"
+    }
+  }
+}

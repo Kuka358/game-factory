@@ -1,0 +1,661 @@
+import Phaser from "phaser";
+
+import type {
+    GameSpec
+} from "@game-factory/game-spec";
+
+import type {
+    GameContext,
+    ScoreChangedEvent
+} from "@game-factory/runtime";
+
+import type {
+    PhaserInputService
+} from "../../input/PhaserInputService.js";
+
+import type {
+    PhaserAssetRegistry
+} from "../../assets/PhaserAssetRegistry.js";
+
+export class EndlessRunnerScene
+    extends Phaser.Scene
+{
+    constructor(
+        private readonly spec:
+            GameSpec,
+
+        private readonly ctx:
+            GameContext,
+
+        private readonly inputAdapter:
+            PhaserInputService,
+
+        private readonly assets:
+            PhaserAssetRegistry
+    ) {
+        super("game");
+    }
+
+    // Runtime state
+
+    private gameOver = false;
+    private ready = false;
+
+    private elapsedTimeMs = 0;
+    private currentWorldSpeed = 0;
+    private distance = 0;
+
+    // Geometry
+
+    private groundTop = 0;
+
+    // Game objects
+
+    private scoreText!:
+        Phaser.GameObjects.Text;
+
+    private ground!:
+        Phaser.GameObjects.Rectangle;
+
+    private player!:
+        Phaser.Physics.Arcade.Image;
+
+    private obstacles!:
+        Phaser.GameObjects.Group;
+
+    preload(): void {
+        this.assets.preload(
+            this
+        );
+    }
+
+    create(): void {
+        const {
+            width,
+            height
+        } = this.scale;
+
+        this.inputAdapter.attach(
+            this
+        );
+
+        this.gameOver = false;
+        this.ready = false;
+
+        this.elapsedTimeMs = 0;
+
+        this.currentWorldSpeed =
+            this.spec.runner.world_speed;
+
+        this.distance = 0;
+
+        this.createBackground(
+            width,
+            height
+        );
+
+        this.createGround(
+            width,
+            height
+        );
+
+        this.createPlayer();
+
+        this.obstacles =
+            this.add.group();
+
+        this.createColliders();
+
+        const unregisterDebugState =
+            this.registerDebugState();
+
+        this.createScoreHud();
+
+        const unsubscribeScore =
+            this.registerScoreEvents();
+
+        this.ctx.score.reset();
+
+        this.createObstacleTimer();
+
+        this.events.once(
+            Phaser.Scenes.Events.SHUTDOWN,
+            () => {
+                unsubscribeScore();
+                unregisterDebugState();
+
+                this.inputAdapter.detach();
+            }
+        );
+
+        void this.ctx
+            .platform
+            .gameReady()
+            .catch(
+                (
+                    error:
+                        unknown
+                ) => {
+                    console.error(
+                        "[platform] gameReady failed",
+                        error
+                    );
+                }
+            );
+    }
+
+    update(
+        _time: number,
+        delta: number
+    ): void {
+        this.updateReadyState();
+
+        if (
+            this.ctx.input.justPressed(
+                "jump"
+            )
+        ) {
+            this.handleJumpAction();
+        }
+
+        if (this.gameOver) {
+            return;
+        }
+
+        this.updateRuntimeState(
+            delta
+        );
+
+        this.updateObstacleSpeeds();
+    }
+
+    private createBackground(
+        width: number,
+        height: number
+    ): void {
+        const background =
+            this.add.image(
+                width / 2,
+                height / 2,
+                this.assets.getTextureKey(
+                    "background"
+                )
+            );
+
+        background
+            .setDisplaySize(
+                width,
+                height
+            )
+            .setDepth(
+                -100
+            );
+    }
+
+    private createGround(
+        width: number,
+        height: number
+    ): void {
+        const groundHeight =
+            120;
+
+        this.groundTop =
+            height -
+            groundHeight;
+
+        this.ground =
+            this.add.rectangle(
+                width / 2,
+
+                this.groundTop +
+                    groundHeight / 2,
+
+                width,
+                groundHeight,
+
+                0x555555
+            );
+
+        this.physics.add.existing(
+            this.ground,
+            true
+        );
+    }
+
+    private createPlayer(): void {
+        this.player =
+            this.physics.add.image(
+                140,
+                0,
+
+                this.assets.getTextureKey(
+                    "player"
+                )
+            );
+
+        this.fitImageToBox(
+            this.player,
+            56,
+            64
+        );
+
+        this.player.setPosition(
+            140,
+
+            this.groundTop -
+                this.player.displayHeight /
+                    2
+        );
+
+        this.player
+            .setCollideWorldBounds(
+                true
+            );
+
+        this.configureBody(
+            this.player,
+
+            0.72,
+            0.88
+        );
+    }
+
+    private createColliders(): void {
+        this.physics.add.collider(
+            this.player,
+            this.ground
+        );
+
+        this.physics.add.collider(
+            this.player,
+            this.obstacles,
+            () => {
+                this.handleGameOver();
+            }
+        );
+    }
+
+    private registerDebugState():
+        () => void
+    {
+        return this.ctx.debug
+            .setStateProvider(
+                () => ({
+                    ready:
+                        this.ready,
+
+                    scene:
+                        "game",
+
+                    player: {
+                        alive:
+                            !this.gameOver,
+
+                        x:
+                            this.player.x,
+
+                        y:
+                            this.player.y
+                    },
+
+                    score:
+                        this.ctx.score.get(),
+
+                    entities: {
+                        obstacle:
+                            this.obstacles
+                                .getChildren()
+                                .length
+                    },
+
+                    game_over:
+                        this.gameOver
+                })
+            );
+    }
+
+    private createScoreHud(): void {
+        this.scoreText =
+            this.add.text(
+                24,
+                24,
+                "Score: 0",
+                {
+                    fontSize:
+                        "28px",
+
+                    color:
+                        "#ffffff"
+                }
+            );
+    }
+
+    private registerScoreEvents():
+        () => void
+    {
+        return this.ctx.events
+            .on<ScoreChangedEvent>(
+                "score.changed",
+
+                ({ value }) => {
+                    this.scoreText
+                        .setText(
+                            `Score: ${value}`
+                        );
+                }
+            );
+    }
+
+    private createObstacleTimer():
+        void
+    {
+        this.time.addEvent({
+            delay:
+                this.spec.runner
+                    .obstacle_spawn_interval_ms,
+
+            callback: () => {
+                this.spawnObstacle();
+            },
+
+            loop:
+                true
+        });
+    }
+
+    private updateReadyState():
+        void
+    {
+        if (this.ready) {
+            return;
+        }
+
+        const body =
+            this.player.body;
+
+        if (!body) {
+            return;
+        }
+
+        if (
+            body.blocked.down ||
+            body.touching.down
+        ) {
+            this.ready = true;
+        }
+    }
+
+    private handleJumpAction():
+        void
+    {
+        if (this.gameOver) {
+            this.scene.restart();
+            return;
+        }
+
+        if (!this.ready) {
+            return;
+        }
+
+        const body =
+            this.player.body as
+                Phaser.Physics.Arcade.Body | null;
+
+        if (!body) {
+            return;
+        }
+
+        const grounded =
+            body.blocked.down ||
+            body.touching.down;
+
+        if (!grounded) {
+            return;
+        }
+
+        body.setVelocityY(
+            -this.spec.player
+                .movement.jump_force
+        );
+    }
+
+    private spawnObstacle(): void {
+        if (this.gameOver) {
+            return;
+        }
+
+        const obstacle =
+            this.physics.add.image(
+                this.scale.width +
+                    50,
+
+                0,
+
+                this.assets.getTextureKey(
+                    "obstacle"
+                )
+            );
+
+        this.fitImageToBox(
+            obstacle,
+            52,
+            64
+        );
+
+        obstacle.setPosition(
+            this.scale.width +
+                50,
+
+            this.groundTop -
+                obstacle.displayHeight /
+                    2
+        );
+
+        obstacle
+            .setImmovable(
+                true
+            )
+            .setVelocityX(
+                -this.currentWorldSpeed
+            );
+
+        const body =
+            this.configureBody(
+                obstacle,
+
+                0.78,
+                0.82
+            );
+
+        body.setAllowGravity(
+            false
+        );
+
+        this.obstacles.add(
+            obstacle
+        );
+    }
+
+    private handleGameOver():
+        void
+    {
+        if (this.gameOver) {
+            return;
+        }
+
+        this.gameOver = true;
+
+        this.physics.pause();
+
+        this.add.text(
+            this.scale.width / 2,
+            this.scale.height / 2,
+
+            "GAME OVER",
+
+            {
+                fontSize:
+                    "48px",
+
+                color:
+                    "#ffffff"
+            }
+        ).setOrigin(
+            0.5
+        );
+
+        this.add.text(
+            this.scale.width / 2,
+
+            this.scale.height /
+                2 +
+                60,
+
+            "Press SPACE or click to restart",
+
+            {
+                fontSize:
+                    "20px",
+
+                color:
+                    "#ffffff"
+            }
+        ).setOrigin(
+            0.5
+        );
+
+        this.ctx.events.emit(
+            "game.over",
+            {
+                score:
+                    this.ctx.score.get()
+            }
+        );
+    }
+
+    private updateRuntimeState(
+        delta: number
+    ): void {
+        this.elapsedTimeMs +=
+            delta;
+
+        const elapsedSeconds =
+            this.elapsedTimeMs /
+            1000;
+
+        this.currentWorldSpeed =
+            this.spec.runner
+                .world_speed +
+            this.spec.runner
+                .speed_increase_per_second *
+                elapsedSeconds;
+
+        const deltaSeconds =
+            delta /
+            1000;
+
+        this.distance +=
+            this.currentWorldSpeed *
+            deltaSeconds;
+
+        const score =
+            Math.floor(
+                this.distance /
+                10
+            );
+
+        this.ctx.score.set(
+            score
+        );
+    }
+
+    private updateObstacleSpeeds():
+        void
+    {
+        for (
+            const child of
+            this.obstacles
+                .getChildren()
+        ) {
+            const obstacle =
+                child as
+                    Phaser.Physics.Arcade.Image;
+
+            obstacle.setVelocityX(
+                -this.currentWorldSpeed
+            );
+
+            if (
+                obstacle.x <
+                -100
+            ) {
+                obstacle.destroy();
+            }
+        }
+    }
+
+    private fitImageToBox(
+        image:
+            Phaser.Physics.Arcade.Image,
+
+        maxWidth:
+            number,
+
+        maxHeight:
+            number
+    ): void {
+        const scale =
+            Math.min(
+                maxWidth /
+                    image.width,
+
+                maxHeight /
+                    image.height
+            );
+
+        image.setScale(
+            scale
+        );
+    }
+
+    private configureBody(
+        image:
+            Phaser.Physics.Arcade.Image,
+
+        widthRatio:
+            number,
+
+        heightRatio:
+            number
+    ): Phaser.Physics.Arcade.Body {
+        const body =
+            image.body as
+                Phaser.Physics.Arcade.Body |
+                null;
+
+        if (!body) {
+            throw new Error(
+                "Arcade physics body was not created"
+            );
+        }
+
+        /*
+        * Body.setSize uses source pixels.
+        *
+        * GameObject scale is then applied
+        * to the body as well.
+        */
+        body.setSize(
+            image.width *
+                widthRatio,
+
+            image.height *
+                heightRatio,
+
+            true
+        );
+
+        return body;
+    }
+}
+

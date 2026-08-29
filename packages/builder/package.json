@@ -1,0 +1,22 @@
+{
+  "name": "@game-factory/builder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@game-factory/game-spec": "workspace:*",
+    "@game-factory/templates": "workspace:*",
+    "@game-factory/engine-core": "workspace:*",
+    "@game-factory/assets": "workspace:*",
+    "vite": "^7.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0"
+  }
+}

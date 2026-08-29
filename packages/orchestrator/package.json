@@ -1,0 +1,31 @@
+{
+  "name": "@game-factory/orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@game-factory/ai": "workspace:*",
+    "@game-factory/builder": "workspace:*",
+    "@game-factory/engine-core": "workspace:*",
+    "@game-factory/qa": "workspace:*",
+    "@game-factory/engine-phaser": "workspace:*",
+    "@game-factory/game-spec": "workspace:*",
+    "@game-factory/assets": "workspace:*",
+    "@game-factory/config": "workspace:*",
+    "@game-factory/spritevault-client": "workspace:*",
+    "@game-factory/templates": "workspace:*",
+    "@game-factory/platform-yandex": "workspace:*",
+    "@game-factory/asset-generator": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3",
+    "@types/node": "^26.2.0"
+  }
+}

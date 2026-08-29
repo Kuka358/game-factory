@@ -1,0 +1,21 @@
+{
+  "name": "@game-factory/ai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@game-factory/game-spec": "workspace:*",
+    "@game-factory/templates": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "vitest": "^3"
+  }
+}

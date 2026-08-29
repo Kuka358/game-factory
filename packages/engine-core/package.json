@@ -1,0 +1,17 @@
+{
+  "name": "@game-factory/engine-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@game-factory/game-spec": "workspace:*",
+    "@game-factory/assets": "workspace:*",
+    "@game-factory/templates": "workspace:*"
+  }
+}

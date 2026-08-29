@@ -1,0 +1,19 @@
+{
+  "name": "@game-factory/playground",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@game-factory/engine-phaser": "workspace:*",
+    "@game-factory/game-spec": "workspace:*",
+    "@game-factory/assets": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "^7"
+  }
+}

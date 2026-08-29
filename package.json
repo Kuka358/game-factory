@@ -1,0 +1,15 @@
+{
+  "name": "game-factory",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "qa": "pnpm --filter @game-factory/qa qa",
+    "generate": "pnpm --filter @game-factory/game-spec build && pnpm --filter @game-factory/platform-web build && pnpm --filter @game-factory/platform-core build && pnpm --filter @game-factory/platform-yandex build && pnpm --filter @game-factory/runtime build && pnpm --filter @game-factory/templates build && pnpm --filter @game-factory/config build && pnpm --filter @game-factory/assets build && pnpm --filter @game-factory/spritevault-client build && pnpm --filter @game-factory/ai build && pnpm --filter @game-factory/engine-core build && pnpm --filter @game-factory/engine-phaser build && pnpm --filter @game-factory/builder build && pnpm --filter @game-factory/qa build && pnpm --filter @game-factory/assets build && pnpm --filter @game-factory/asset-generator build && pnpm --filter @game-factory/orchestrator build && pnpm --filter @game-factory/cli dev"},
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}
