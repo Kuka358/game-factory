@@ -9,7 +9,8 @@ import sharp from "sharp";
 import {
     calculateHorizontalSeamScore,
     calculateInterTileSeamScore,
-    findBestCyclicTileOrder
+    findBestCyclicTileOrder,
+    validateTileFrameArtifacts
 } from "../src/TilesetGenerator.js";
 
 
@@ -278,6 +279,243 @@ describe(
                     result.minimumScore
                 ).toBe(
                     92
+                );
+            }
+        );
+
+        test(
+            "rejects a flat black frame around a terrain tile",
+            async () => {
+                const framed =
+                    await sharp({
+                        create: {
+                            width:
+                                64,
+
+                            height:
+                                64,
+
+                            channels:
+                                4,
+
+                            background: {
+                                r:
+                                    0,
+
+                                g:
+                                    0,
+
+                                b:
+                                    0,
+
+                                alpha:
+                                    1
+                            }
+                        }
+                    })
+                        .composite([
+                            {
+                                input: {
+                                    create: {
+                                        width:
+                                            56,
+
+                                        height:
+                                            56,
+
+                                        channels:
+                                            4,
+
+                                        background: {
+                                            r:
+                                                90,
+
+                                            g:
+                                                120,
+
+                                            b:
+                                                65,
+
+                                            alpha:
+                                                1
+                                        }
+                                    }
+                                },
+
+                                left:
+                                    4,
+
+                                top:
+                                    4
+                            }
+                        ])
+                        .png()
+                        .toBuffer();
+
+
+                const result =
+                    await validateTileFrameArtifacts(
+                        framed
+                    );
+
+
+                expect(
+                    result.valid
+                ).toBe(
+                    false
+                );
+
+
+                expect(
+                    result.issues
+                ).toContain(
+                    "probable_frame"
+                );
+            }
+        );
+
+        test(
+            "allows a uniformly dark terrain material",
+            async () => {
+                const darkTerrain =
+                    await sharp({
+                        create: {
+                            width:
+                                64,
+
+                            height:
+                                64,
+
+                            channels:
+                                4,
+
+                            background: {
+                                r:
+                                    12,
+
+                                g:
+                                    14,
+
+                                b:
+                                    16,
+
+                                alpha:
+                                    1
+                            }
+                        }
+                    })
+                        .png()
+                        .toBuffer();
+
+
+                const result =
+                    await validateTileFrameArtifacts(
+                        darkTerrain
+                    );
+
+
+                expect(
+                    result.valid
+                ).toBe(
+                    true
+                );
+
+
+                expect(
+                    result.issues
+                ).toEqual(
+                    []
+                );
+            }
+        );
+
+        test(
+            "rejects transparent terrain edges",
+            async () => {
+                const transparentFrame =
+                    await sharp({
+                        create: {
+                            width:
+                                64,
+
+                            height:
+                                64,
+
+                            channels:
+                                4,
+
+                            background: {
+                                r:
+                                    0,
+
+                                g:
+                                    0,
+
+                                b:
+                                    0,
+
+                                alpha:
+                                    0
+                            }
+                        }
+                    })
+                        .composite([
+                            {
+                                input: {
+                                    create: {
+                                        width:
+                                            56,
+
+                                        height:
+                                            56,
+
+                                        channels:
+                                            4,
+
+                                        background: {
+                                            r:
+                                                80,
+
+                                            g:
+                                                100,
+
+                                            b:
+                                                70,
+
+                                            alpha:
+                                                1
+                                        }
+                                    }
+                                },
+
+                                left:
+                                    4,
+
+                                top:
+                                    4
+                            }
+                        ])
+                        .png()
+                        .toBuffer();
+
+
+                const result =
+                    await validateTileFrameArtifacts(
+                        transparentFrame
+                    );
+
+
+                expect(
+                    result.valid
+                ).toBe(
+                    false
+                );
+
+
+                expect(
+                    result.issues
+                ).toContain(
+                    "transparent_border"
                 );
             }
         );

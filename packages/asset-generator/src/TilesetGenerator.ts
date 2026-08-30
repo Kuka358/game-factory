@@ -16,7 +16,7 @@ import type {
 
 
 const TILESET_PROCESSOR_VERSION =
-    "tileset-atlas-1";
+    "tileset-atlas-2-frame-validation";
 
 
 const DEFAULT_GENERATION_SIZE =
@@ -55,6 +55,7 @@ const TILE_VARIANTS = [
 
     "clean alternate terrain variation"
 ] as const;
+
 
 
 export interface AssetGeneratorLike {
@@ -99,6 +100,31 @@ export interface GeneratedTilesetGenerator {
     ): Promise<GeneratedAsset>;
 }
 
+export type TileFrameSide =
+    | "top"
+    | "right"
+    | "bottom"
+    | "left";
+
+
+export type TileFrameArtifactIssue =
+    | "transparent_border"
+    | "probable_frame";
+
+
+export interface TileFrameArtifactValidationResult {
+    valid:
+        boolean;
+
+    issues:
+        TileFrameArtifactIssue[];
+
+    suspiciousSides:
+        TileFrameSide[];
+
+    transparentSides:
+        TileFrameSide[];
+}
 
 interface GeneratedTileCandidate {
     sourceIndex:
@@ -112,6 +138,9 @@ interface GeneratedTileCandidate {
 
     seamScore:
         number;
+
+    frameValidation:
+        TileFrameArtifactValidationResult;
 }
 
 
@@ -621,6 +650,11 @@ export class TilesetGenerator
                     resized
                 );
 
+            const frameValidation =
+                await validateTileFrameArtifacts(
+                    resized
+                );
+
 
             const candidate:
                 GeneratedTileCandidate = {
@@ -633,8 +667,41 @@ export class TilesetGenerator
                 bytes:
                     resized,
 
-                seamScore
+                seamScore,
+
+                frameValidation
             };
+
+            if (
+                !frameValidation.valid
+            ) {
+                console.warn(
+                    [
+                        "[tileset-generator]",
+                        `tile=${input.tileIndex}`,
+                        `attempt=${attempt}`,
+                        `frame-artifact=${frameValidation.issues.join(",")}`,
+                        `sides=${frameValidation.suspiciousSides.join(",") || "none"}`,
+                        `transparent=${frameValidation.transparentSides.join(",") || "none"}`
+                    ].join(
+                        " "
+                    )
+                );
+
+
+                retrySeed =
+                    deriveRetrySeed(
+                        generated.metadata
+                            .generator
+                            .seed,
+
+                        attempt +
+                            1
+                    );
+
+
+                continue;
+            }
 
 
             if (
@@ -684,7 +751,12 @@ export class TilesetGenerator
             !best
         ) {
             throw new Error(
-                `Unable to generate tileset tile ${input.tileIndex}`
+                [
+                    `Unable to generate tileset tile ${input.tileIndex}.`,
+                    `All ${input.maxAttempts} attempts contained frame artifacts.`
+                ].join(
+                    " "
+                )
             );
         }
 
@@ -885,6 +957,537 @@ export async function calculateHorizontalSeamScore(
             2
         )
     );
+}
+
+interface DecodedTileImage {
+    data:
+        Buffer;
+
+    width:
+        number;
+
+    height:
+        number;
+
+    channels:
+        number;
+}
+
+
+interface TileStripStats {
+    meanLuminance:
+        number;
+
+    stdDevLuminance:
+        number;
+
+    meanAlpha:
+        number;
+}
+
+
+export async function validateTileFrameArtifacts(
+    bytes:
+        Uint8Array,
+
+    borderWidth =
+        4
+): Promise<TileFrameArtifactValidationResult> {
+    const image =
+        await decodeTileImage(
+            bytes
+        );
+
+
+    if (
+        image.width <
+            8 ||
+        image.height <
+            8
+    ) {
+        return {
+            valid:
+                false,
+
+            issues: [
+                "probable_frame"
+            ],
+
+            suspiciousSides: [
+                "top",
+                "right",
+                "bottom",
+                "left"
+            ],
+
+            transparentSides:
+                []
+        };
+    }
+
+
+    const resolvedWidth =
+        Math.max(
+            1,
+
+            Math.min(
+                borderWidth,
+
+                Math.floor(
+                    Math.min(
+                        image.width,
+                        image.height
+                    ) /
+                    4
+                )
+            )
+        );
+
+
+    const sides:
+        readonly TileFrameSide[] = [
+            "top",
+            "right",
+            "bottom",
+            "left"
+        ];
+
+
+    const suspiciousSides:
+        TileFrameSide[] =
+        [];
+
+
+    const transparentSides:
+        TileFrameSide[] =
+        [];
+
+
+    for (
+        const side of
+        sides
+    ) {
+        const outer =
+            collectTileStripStats(
+                image,
+                side,
+                0,
+                resolvedWidth
+            );
+
+
+        const inner =
+            collectTileStripStats(
+                image,
+                side,
+                resolvedWidth,
+                resolvedWidth
+            );
+
+
+        /*
+         * Terrain tiles are expected to fill the complete
+         * canvas. A substantially transparent edge is always
+         * suspicious.
+         */
+        if (
+            outer.meanAlpha <
+            245
+        ) {
+            transparentSides.push(
+                side
+            );
+        }
+
+
+        const luminanceContrast =
+            Math.abs(
+                inner.meanLuminance -
+                outer.meanLuminance
+            );
+
+
+        /*
+         * A generated frame normally looks like a very
+         * uniform strip followed by a sudden material change.
+         *
+         * Darkness alone is NOT enough: a uniformly dark
+         * volcanic/space material must remain valid.
+         */
+        const flatContrastingStrip =
+            outer.stdDevLuminance <=
+                10 &&
+            luminanceContrast >=
+                18;
+
+
+        const probableDarkBar =
+            outer.meanLuminance <=
+                24 &&
+            (
+                inner.meanLuminance -
+                outer.meanLuminance
+            ) >=
+                14 &&
+            outer.stdDevLuminance <=
+                14;
+
+
+        if (
+            flatContrastingStrip ||
+            probableDarkBar
+        ) {
+            suspiciousSides.push(
+                side
+            );
+        }
+    }
+
+
+    const hasHorizontalPair =
+        suspiciousSides.includes(
+            "top"
+        ) &&
+        suspiciousSides.includes(
+            "bottom"
+        );
+
+
+    const hasVerticalPair =
+        suspiciousSides.includes(
+            "left"
+        ) &&
+        suspiciousSides.includes(
+            "right"
+        );
+
+
+    /*
+     * Requiring either an opposite pair or 3+ suspicious
+     * sides avoids treating one naturally dark edge as a
+     * generated frame.
+     */
+    const probableFrame =
+        hasHorizontalPair ||
+        hasVerticalPair ||
+        suspiciousSides.length >=
+            3;
+
+
+    const issues:
+        TileFrameArtifactIssue[] =
+        [];
+
+
+    if (
+        transparentSides.length >
+        0
+    ) {
+        issues.push(
+            "transparent_border"
+        );
+    }
+
+
+    if (
+        probableFrame
+    ) {
+        issues.push(
+            "probable_frame"
+        );
+    }
+
+
+    return {
+        valid:
+            issues.length ===
+            0,
+
+        issues,
+
+        suspiciousSides,
+
+        transparentSides
+    };
+}
+
+
+async function decodeTileImage(
+    bytes:
+        Uint8Array
+): Promise<DecodedTileImage> {
+    const decoded =
+        await sharp(
+            Buffer.from(
+                bytes
+            )
+        )
+            .ensureAlpha()
+            .raw()
+            .toBuffer({
+                resolveWithObject:
+                    true
+            });
+
+
+    return {
+        data:
+            decoded.data,
+
+        width:
+            decoded.info.width,
+
+        height:
+            decoded.info.height,
+
+        channels:
+            decoded.info.channels
+    };
+}
+
+
+function collectTileStripStats(
+    image:
+        DecodedTileImage,
+
+    side:
+        TileFrameSide,
+
+    offset:
+        number,
+
+    thickness:
+        number
+): TileStripStats {
+    let luminanceSum =
+        0;
+
+    let luminanceSquaredSum =
+        0;
+
+    let alphaSum =
+        0;
+
+    let samples =
+        0;
+
+
+    const inspect =
+        (
+            x:
+                number,
+
+            y:
+                number
+        ): void => {
+            if (
+                x <
+                    0 ||
+                x >=
+                    image.width ||
+                y <
+                    0 ||
+                y >=
+                    image.height
+            ) {
+                return;
+            }
+
+
+            const index =
+                (
+                    y *
+                    image.width +
+                    x
+                ) *
+                image.channels;
+
+
+            const red =
+                image.data[
+                    index
+                ] ??
+                0;
+
+
+            const green =
+                image.data[
+                    index +
+                    1
+                ] ??
+                0;
+
+
+            const blue =
+                image.data[
+                    index +
+                    2
+                ] ??
+                0;
+
+
+            const alpha =
+                image.data[
+                    index +
+                    3
+                ] ??
+                255;
+
+
+            const luminance =
+                red *
+                    0.2126 +
+                green *
+                    0.7152 +
+                blue *
+                    0.0722;
+
+
+            luminanceSum +=
+                luminance;
+
+
+            luminanceSquaredSum +=
+                luminance *
+                luminance;
+
+
+            alphaSum +=
+                alpha;
+
+
+            samples +=
+                1;
+        };
+
+
+    if (
+        side ===
+            "left" ||
+        side ===
+            "right"
+    ) {
+        const startX =
+            side ===
+                "left"
+                ? offset
+                : image.width -
+                    offset -
+                    thickness;
+
+
+        for (
+            let x =
+                startX;
+
+            x <
+                startX +
+                    thickness;
+
+            x +=
+                1
+        ) {
+            for (
+                let y =
+                    0;
+
+                y <
+                    image.height;
+
+                y +=
+                    1
+            ) {
+                inspect(
+                    x,
+                    y
+                );
+            }
+        }
+    } else {
+        const startY =
+            side ===
+                "top"
+                ? offset
+                : image.height -
+                    offset -
+                    thickness;
+
+
+        for (
+            let y =
+                startY;
+
+            y <
+                startY +
+                    thickness;
+
+            y +=
+                1
+        ) {
+            for (
+                let x =
+                    0;
+
+                x <
+                    image.width;
+
+                x +=
+                    1
+            ) {
+                inspect(
+                    x,
+                    y
+                );
+            }
+        }
+    }
+
+
+    if (
+        samples ===
+        0
+    ) {
+        return {
+            meanLuminance:
+                0,
+
+            stdDevLuminance:
+                0,
+
+            meanAlpha:
+                0
+        };
+    }
+
+
+    const meanLuminance =
+        luminanceSum /
+        samples;
+
+
+    const variance =
+        Math.max(
+            0,
+
+            luminanceSquaredSum /
+                samples -
+                meanLuminance *
+                meanLuminance
+        );
+
+
+    return {
+        meanLuminance,
+
+        stdDevLuminance:
+            Math.sqrt(
+                variance
+            ),
+
+        meanAlpha:
+            alphaSum /
+            samples
+    };
 }
 
 export async function calculateInterTileSeamScore(
