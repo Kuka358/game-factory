@@ -7,8 +7,11 @@ import {
 } from "../../physics.js";
 
 
+const PLATFORM_TILE_SIZE =
+    64;
+
 const PLATFORM_HEIGHT =
-    48;
+    PLATFORM_TILE_SIZE;
 
 
 const MIN_PLATFORM_CENTER_Y =
@@ -109,14 +112,16 @@ export function generatePlatformerLevel(
 
 
     const firstWidth =
-        clamp(
-            420,
+        randomGridAlignedInteger(
+            random,
 
             settings
                 .platform_width_min,
 
             settings
-                .platform_width_max
+                .platform_width_max,
+
+            PLATFORM_TILE_SIZE
         );
 
 
@@ -182,14 +187,16 @@ export function generatePlatformerLevel(
         targetRightEdge
     ) {
         const width =
-            randomInteger(
+            randomGridAlignedInteger(
                 random,
 
                 settings
                     .platform_width_min,
 
                 settings
-                    .platform_width_max
+                    .platform_width_max,
+
+                PLATFORM_TILE_SIZE
             );
 
 
@@ -642,6 +649,90 @@ function randomInteger(
                 1
             )
         )
+    );
+}
+
+function randomGridAlignedInteger(
+    random:
+        () => number,
+
+    minimum:
+        number,
+
+    maximum:
+        number,
+
+    grid:
+        number
+): number {
+    const min =
+        Math.ceil(
+            Math.min(
+                minimum,
+                maximum
+            )
+        );
+
+    const max =
+        Math.floor(
+            Math.max(
+                minimum,
+                maximum
+            )
+        );
+
+
+    const firstAligned =
+        Math.ceil(
+            min /
+            grid
+        ) *
+        grid;
+
+    const lastAligned =
+        Math.floor(
+            max /
+            grid
+        ) *
+        grid;
+
+
+    /*
+     * Normally platform bounds contain at least one
+     * complete 64px tile.
+     *
+     * Keep a defensive fallback for unusual specs.
+     */
+    if (
+        firstAligned >
+        lastAligned
+    ) {
+        return randomInteger(
+            random,
+            min,
+            max
+        );
+    }
+
+
+    const stepCount =
+        Math.floor(
+            (
+                lastAligned -
+                firstAligned
+            ) /
+            grid
+        );
+
+
+    return (
+        firstAligned +
+        randomInteger(
+            random,
+            0,
+            stepCount
+        ) *
+        grid
     );
 }
 

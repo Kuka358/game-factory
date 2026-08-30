@@ -20,12 +20,27 @@ import {
     generatePlatformerLevel,
 
     type PlatformerLevelLayout,
+    type PlatformerLevelPlatform,
     type PlatformerLevelPoint
 } from "./PlatformerLevelGenerator.js";
 
 
 const GOAL_ROLE =
     "goal";
+
+const LEVEL_TILES_ROLE =
+    "level_tiles";
+
+interface LevelTilesRenderConfig {
+    textureKey:
+        string;
+
+    tileWidth:
+        number;
+
+    frameCount:
+        number;
+}
 
 
 export class PlatformerScene
@@ -413,10 +428,20 @@ export class PlatformerScene
         layout:
             PlatformerLevelLayout
     ): void {
+        const levelTiles =
+            this.getLevelTilesRenderConfig();
+
+
         for (
             const definition of
             layout.platforms
         ) {
+            /*
+            * Physics remains a deterministic rectangle.
+            *
+            * Generated tiles are visuals only. This means bad
+            * artwork can never change collision geometry.
+            */
             const platform =
                 this.platforms
                     .create(
@@ -436,6 +461,193 @@ export class PlatformerScene
                     0x666666
                 )
                 .refreshBody();
+
+
+            if (
+                !levelTiles
+            ) {
+                continue;
+            }
+
+
+            /*
+            * Collision object stays alive, but generated tiles
+            * become the visible representation.
+            */
+            platform.setVisible(
+                false
+            );
+
+
+            this.createPlatformTileVisuals(
+                definition,
+                levelTiles
+            );
+        }
+    }
+
+    private getLevelTilesRenderConfig():
+        LevelTilesRenderConfig |
+        undefined
+    {
+        if (
+            !this.assets.has(
+                LEVEL_TILES_ROLE
+            )
+        ) {
+            return undefined;
+        }
+
+
+        const spritesheet =
+            this.assets.getSpriteSheet(
+                LEVEL_TILES_ROLE
+            );
+
+
+        if (
+            !spritesheet
+        ) {
+            console.warn(
+                [
+                    `Asset "${LEVEL_TILES_ROLE}" exists`,
+                    "but does not define spritesheet metadata."
+                ].join(
+                    " "
+                )
+            );
+
+            return undefined;
+        }
+
+
+        const frameCount =
+            spritesheet.columns *
+            spritesheet.rows;
+
+
+        if (
+            spritesheet.frameWidth <=
+                0 ||
+            spritesheet.frameHeight <=
+                0 ||
+            frameCount <=
+                0
+        ) {
+            console.warn(
+                `Asset "${LEVEL_TILES_ROLE}" has invalid spritesheet metadata`
+            );
+
+            return undefined;
+        }
+
+
+        return {
+            textureKey:
+                this.assets
+                    .getTextureKey(
+                        LEVEL_TILES_ROLE
+                    ),
+
+            tileWidth:
+                spritesheet
+                    .frameWidth,
+
+            frameCount
+        };
+    }
+
+    private createPlatformTileVisuals(
+        definition:
+            PlatformerLevelPlatform,
+
+        config:
+            LevelTilesRenderConfig
+    ): void {
+        const left =
+            definition.x -
+            definition.width /
+                2;
+
+        const top =
+            definition.y -
+            definition.height /
+                2;
+
+
+        const columnCount =
+            Math.ceil(
+                definition.width /
+                config.tileWidth
+            );
+
+
+        for (
+            let column =
+                0;
+
+            column <
+                columnCount;
+
+            column +=
+                1
+        ) {
+            const x =
+                left +
+                column *
+                    config.tileWidth;
+
+
+            const remainingWidth =
+                definition.width -
+                column *
+                    config.tileWidth;
+
+
+            const displayWidth =
+                Math.min(
+                    config.tileWidth,
+                    remainingWidth
+                );
+
+
+            /*
+            * Atlas generation orders frames so adjacent frames
+            * have the best possible edge compatibility.
+            *
+            * Keep that order instead of choosing random frames.
+            * Platform index only changes the starting point.
+            */
+            const frame =
+                (
+                    definition.index +
+                    column
+                ) %
+                config.frameCount;
+
+
+            const tile =
+                this.add.image(
+                    x,
+                    top,
+
+                    config.textureKey,
+                    frame
+                );
+
+
+            tile
+                .setOrigin(
+                    0,
+                    0
+                )
+                .setDisplaySize(
+                    displayWidth,
+                    definition.height
+                )
+                .setDepth(
+                    -10
+                );
         }
     }
 
