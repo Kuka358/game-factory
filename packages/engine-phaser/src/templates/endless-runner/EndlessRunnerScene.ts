@@ -84,6 +84,13 @@ export class EndlessRunnerScene
     private ground!:
         Phaser.GameObjects.Rectangle;
 
+    private groundTileVisuals:
+        Phaser.GameObjects.Image[] =
+        [];
+
+    private nextGroundFrame =
+        0;
+
     private player!:
         Phaser.Physics.Arcade.Image;
 
@@ -123,6 +130,12 @@ export class EndlessRunnerScene
             0;
 
         this.hazardSpawnCount =
+            0;
+
+        this.groundTileVisuals =
+            [];
+
+        this.nextGroundFrame =
             0;
 
         this.createBackground(
@@ -210,6 +223,10 @@ export class EndlessRunnerScene
         }
 
         this.updateRuntimeState(
+            delta
+        );
+
+        this.updateGroundTileVisuals(
             delta
         );
 
@@ -382,8 +399,7 @@ export class EndlessRunnerScene
                 1
         ) {
             const frame =
-                selectGroundFrame(
-                    column,
+                this.takeNextGroundFrame(
                     frameCount
                 );
 
@@ -413,7 +429,39 @@ export class EndlessRunnerScene
                 .setDepth(
                     -10
                 );
+
+            this.groundTileVisuals.push(
+                tile
+            );
         }
+    }
+
+    private takeNextGroundFrame(
+        frameCount:
+            number
+    ): number {
+        if (
+            frameCount <=
+            1
+        ) {
+            return 0;
+        }
+
+
+        const frame =
+            this.nextGroundFrame %
+            frameCount;
+
+
+        this.nextGroundFrame =
+            (
+                this.nextGroundFrame +
+                1
+            ) %
+            frameCount;
+
+
+        return frame;
     }
 
     private createPlayer(): void {
@@ -1033,6 +1081,140 @@ export class EndlessRunnerScene
         );
     }
 
+    private updateGroundTileVisuals(
+        delta:
+            number
+    ): void {
+        if (
+            this.groundTileVisuals.length ===
+            0
+        ) {
+            return;
+        }
+
+
+        const spritesheet =
+            this.assets.getSpriteSheet(
+                GROUND_TILES_ROLE
+            );
+
+
+        if (
+            !spritesheet
+        ) {
+            return;
+        }
+
+
+        const frameCount =
+            spritesheet.columns *
+            spritesheet.rows;
+
+
+        if (
+            frameCount <=
+            0
+        ) {
+            return;
+        }
+
+
+        const tileWidth =
+            spritesheet.frameWidth;
+
+
+        if (
+            tileWidth <=
+            0
+        ) {
+            return;
+        }
+
+
+        /*
+        * Modulo prevents a huge delta after tab switching
+        * from moving the entire ground strip thousands of
+        * pixels away in a single frame.
+        */
+        const stripWidth =
+            tileWidth *
+            this.groundTileVisuals.length;
+
+
+        const movement =
+            (
+                this.currentWorldSpeed *
+                (
+                    delta /
+                    1000
+                )
+            ) %
+            stripWidth;
+
+
+        for (
+            const tile of
+            this.groundTileVisuals
+        ) {
+            tile.x -=
+                movement;
+        }
+
+
+        let rightmostX =
+            Math.max(
+                ...this.groundTileVisuals
+                    .map(
+                        tile =>
+                            tile.x
+                    )
+            );
+
+
+        /*
+        * Recycle from left to right so multiple tiles that
+        * leave the screen during the same frame keep their
+        * spatial ordering.
+        */
+        const offscreen =
+            this.groundTileVisuals
+                .filter(
+                    tile =>
+                        tile.x +
+                            tileWidth <=
+                        0
+                )
+                .sort(
+                    (
+                        left,
+                        right
+                    ) =>
+                        left.x -
+                        right.x
+                );
+
+
+        for (
+            const tile of
+            offscreen
+        ) {
+            tile.x =
+                rightmostX +
+                tileWidth;
+
+
+            rightmostX =
+                tile.x;
+
+
+            tile.setFrame(
+                this.takeNextGroundFrame(
+                    frameCount
+                )
+            );
+        }
+    }
+
     private updateObstacleSpeeds():
         void
     {
@@ -1183,34 +1365,4 @@ export class EndlessRunnerScene
 
         return body;
     }
-}
-
-function selectGroundFrame(
-    column:
-        number,
-
-    frameCount:
-        number
-): number {
-    if (
-        frameCount <=
-        1
-    ) {
-        return 0;
-    }
-
-
-    /*
-     * Deterministic variation.
-     *
-     * Avoids the ground visually changing every time the
-     * scene restarts while still preventing one frame from
-     * being repeated across the whole screen.
-     */
-    return (
-        column *
-        5 +
-        3
-    ) %
-        frameCount;
 }
