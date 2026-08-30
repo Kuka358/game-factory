@@ -8,35 +8,83 @@ import type {
     InputService
 } from "@game-factory/runtime";
 
+
 export class PhaserInputService
     implements InputService
 {
     private readonly pressedActions =
         new Set<string>();
 
+    private readonly heldActions =
+        new Set<string>();
+
     private readonly cleanupCallbacks:
-        Array<() => void> = [];
+        Array<() => void> =
+        [];
+
 
     constructor(
-        private readonly controls: ControlsSpec
+        private readonly controls:
+            ControlsSpec
     ) {}
 
-    attach(scene: Phaser.Scene): void {
+
+    attach(
+        scene:
+            Phaser.Scene
+    ): void {
         this.detach();
 
-        this.attachKeyboard(scene);
-        this.attachPointer(scene);
+        this.attachKeyboard(
+            scene
+        );
+
+        this.attachPointer(
+            scene
+        );
     }
 
-    justPressed(action: string): boolean {
-        if (!this.pressedActions.has(action)) {
+
+    justPressed(
+        action:
+            string
+    ): boolean {
+        if (
+            !this.pressedActions.has(
+                action
+            )
+        ) {
             return false;
         }
 
-        this.pressedActions.delete(action);
+
+        this.pressedActions.delete(
+            action
+        );
 
         return true;
     }
+
+
+    isPressed(
+        action:
+            string
+    ): boolean {
+        return this.heldActions.has(
+            action
+        );
+    }
+
+
+    dispatchAction(
+        action:
+            string
+    ): void {
+        this.pressedActions.add(
+            action
+        );
+    }
+
 
     detach(): void {
         for (
@@ -46,43 +94,131 @@ export class PhaserInputService
             cleanup();
         }
 
-        this.cleanupCallbacks.length = 0;
+
+        this.cleanupCallbacks.length =
+            0;
+
         this.pressedActions.clear();
+        this.heldActions.clear();
     }
+
 
     private attachKeyboard(
-        scene: Phaser.Scene
+        scene:
+            Phaser.Scene
     ): void {
-        if (
-            !this.controls.jump.includes(
-                "keyboard_space"
-            )
+        for (
+            const control of
+            this.controls.jump
         ) {
-            return;
+            switch (
+                control
+            ) {
+                case "keyboard_space":
+                    this.attachKey(
+                        scene,
+                        "jump",
+                        Phaser.Input.Keyboard
+                            .KeyCodes
+                            .SPACE
+                    );
+
+                    break;
+
+                case "keyboard_up":
+                    this.attachKey(
+                        scene,
+                        "jump",
+                        Phaser.Input.Keyboard
+                            .KeyCodes
+                            .UP
+                    );
+
+                    break;
+            }
         }
 
-        const key =
-            scene.input.keyboard?.addKey(
-                Phaser.Input.Keyboard.KeyCodes.SPACE
-            );
 
-        if (!key) {
-            return;
+        if (
+            "move_left" in
+            this.controls
+        ) {
+            for (
+                const control of
+                this.controls
+                    .move_left
+            ) {
+                switch (
+                    control
+                ) {
+                    case "keyboard_a":
+                        this.attachKey(
+                            scene,
+                            "move_left",
+                            Phaser.Input.Keyboard
+                                .KeyCodes
+                                .A
+                        );
+
+                        break;
+
+                    case "keyboard_left":
+                        this.attachKey(
+                            scene,
+                            "move_left",
+                            Phaser.Input.Keyboard
+                                .KeyCodes
+                                .LEFT
+                        );
+
+                        break;
+                }
+            }
         }
 
-        const handleDown = (): void => {
-            this.pressedActions.add("jump");
-        };
 
-        key.on("down", handleDown);
+        if (
+            "move_right" in
+            this.controls
+        ) {
+            for (
+                const control of
+                this.controls
+                    .move_right
+            ) {
+                switch (
+                    control
+                ) {
+                    case "keyboard_d":
+                        this.attachKey(
+                            scene,
+                            "move_right",
+                            Phaser.Input.Keyboard
+                                .KeyCodes
+                                .D
+                        );
 
-        this.cleanupCallbacks.push(() => {
-            key.off("down", handleDown);
-        });
+                        break;
+
+                    case "keyboard_right":
+                        this.attachKey(
+                            scene,
+                            "move_right",
+                            Phaser.Input.Keyboard
+                                .KeyCodes
+                                .RIGHT
+                        );
+
+                        break;
+                }
+            }
+        }
     }
 
+
     private attachPointer(
-        scene: Phaser.Scene
+        scene:
+            Phaser.Scene
     ): void {
         if (
             !this.controls.jump.includes(
@@ -92,24 +228,106 @@ export class PhaserInputService
             return;
         }
 
-        const handlePointerDown = (): void => {
-            this.pressedActions.add("jump");
-        };
+
+        const handlePointerDown =
+            (): void => {
+                this.pressedActions.add(
+                    "jump"
+                );
+            };
+
 
         scene.input.on(
             "pointerdown",
             handlePointerDown
         );
 
-        this.cleanupCallbacks.push(() => {
-            scene.input.off(
-                "pointerdown",
-                handlePointerDown
-            );
-        });
+
+        this.cleanupCallbacks.push(
+            () => {
+                scene.input.off(
+                    "pointerdown",
+                    handlePointerDown
+                );
+            }
+        );
     }
 
-    dispatchAction(action: string): void {
-        this.pressedActions.add(action);
+
+    private attachKey(
+        scene:
+            Phaser.Scene,
+
+        action:
+            string,
+
+        keyCode:
+            number
+    ): void {
+        const key =
+            scene.input.keyboard
+                ?.addKey(
+                    keyCode
+                );
+
+
+        if (
+            !key
+        ) {
+            return;
+        }
+
+
+        const handleDown =
+            (): void => {
+                if (
+                    !this.heldActions.has(
+                        action
+                    )
+                ) {
+                    this.pressedActions.add(
+                        action
+                    );
+                }
+
+
+                this.heldActions.add(
+                    action
+                );
+            };
+
+
+        const handleUp =
+            (): void => {
+                this.heldActions.delete(
+                    action
+                );
+            };
+
+
+        key.on(
+            "down",
+            handleDown
+        );
+
+        key.on(
+            "up",
+            handleUp
+        );
+
+
+        this.cleanupCallbacks.push(
+            () => {
+                key.off(
+                    "down",
+                    handleDown
+                );
+
+                key.off(
+                    "up",
+                    handleUp
+                );
+            }
+        );
     }
 }

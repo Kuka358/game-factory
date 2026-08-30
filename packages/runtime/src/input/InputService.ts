@@ -1,5 +1,15 @@
-export type InputAction = string;
+export type InputAction =
+    string;
+
 
 export interface InputService {
-    justPressed(action: InputAction): boolean;
+    justPressed(
+        action:
+            InputAction
+    ): boolean;
+
+    isPressed(
+        action:
+            InputAction
+    ): boolean;
 }

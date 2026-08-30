@@ -2,9 +2,13 @@ import type Phaser from "phaser";
 
 import {
     isEndlessRunnerGameSpec,
+    isPlatformerGameSpec,
 
     type GameSpec
 } from "@game-factory/game-spec";
+import {
+    PlatformerScene
+} from "./platformer/PlatformerScene.js";
 
 import type {
     GameContext
@@ -45,11 +49,9 @@ type PhaserTemplateFactory = (
 ) => Phaser.Scene;
 
 const templateFactories:
-    Partial<
-        Record<
-            TemplateId,
-            PhaserTemplateFactory
-        >
+    Record<
+        TemplateId,
+        PhaserTemplateFactory
     > = {
         endless_runner:
             ({
@@ -75,6 +77,37 @@ const templateFactories:
 
 
                 return new EndlessRunnerScene(
+                    spec,
+                    ctx,
+                    input,
+                    assets
+                );
+            },
+
+        platformer:
+            ({
+                spec,
+                ctx,
+                input,
+                assets
+            }) => {
+                if (
+                    !isPlatformerGameSpec(
+                        spec
+                    )
+                ) {
+                    throw new Error(
+                        [
+                            "Template platformer received incompatible GameSpec:",
+                            spec.game.genre
+                        ].join(
+                            " "
+                        )
+                    );
+                }
+
+
+                return new PlatformerScene(
                     spec,
                     ctx,
                     input,
