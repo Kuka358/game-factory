@@ -307,6 +307,15 @@ export class AssetGenerator {
             if (
                 validation.valid
             ) {
+
+                if (
+                    validation.semanticReview
+                ) {
+                    generated.asset
+                        .metadata
+                        .semantic =
+                        validation.semanticReview;
+                }
                 /*
                  * Only valid generated images are persisted.
                  *

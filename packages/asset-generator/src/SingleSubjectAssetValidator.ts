@@ -1,6 +1,7 @@
 import sharp from "sharp";
 
 import type {
+    GeneratedAssetSemanticMetadata,
     GeneratedImage,
     NormalizedAssetGenerationRequest
 } from "./AssetGenerationTypes.js";
@@ -8,7 +9,8 @@ import type {
 export type AssetValidationIssueCode =
     | "probable_spritesheet"
     | "multiple_subjects"
-    | "subject_too_small";
+    | "subject_too_small"
+    | "semantic_mismatch";
 
 export interface AssetValidationIssue {
     code:
@@ -24,6 +26,9 @@ export interface AssetValidationResult {
 
     issues:
         AssetValidationIssue[];
+
+    semanticReview?:
+        GeneratedAssetSemanticMetadata;
 }
 
 export interface GeneratedAssetValidator {

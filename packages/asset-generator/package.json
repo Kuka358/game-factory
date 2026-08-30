@@ -17,7 +17,8 @@
     "test": "vitest run",
     "benchmark:quality": "pnpm build && node scripts/benchmark-models.mjs",
     "benchmark:detail": "pnpm build && node scripts/benchmark-detail.mjs",
-    "benchmark:background": "pnpm build && node scripts/benchmark-background.mjs"
+    "benchmark:background": "pnpm build && node scripts/benchmark-background.mjs",
+    "regression:smoke": "pnpm build && node scripts/smoke-regression.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

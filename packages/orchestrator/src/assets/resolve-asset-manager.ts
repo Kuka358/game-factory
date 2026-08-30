@@ -12,8 +12,19 @@ import {
     FileGeneratedAssetCache,
     GeneratedAssetManager,
     ProfiledComfyUIProvider,
+    SemanticAssetValidator,
+    SequentialAssetValidator,
+    SingleSubjectAssetValidator,
     StrategicAssetManager
 } from "@game-factory/asset-generator";
+
+import {
+    AIAssetSemanticReviewer
+} from "./AIAssetSemanticReviewer.js";
+
+import {
+    resolveAIProvider
+} from "../ai/resolve-ai-provider.js";
 
 import type {
     AssetGenerationProfile
@@ -302,6 +313,52 @@ function resolveGeneratedAssetManager(
                     generation.cacheDir
                 );
 
+            const structuralValidator =
+                new SingleSubjectAssetValidator();
+
+
+            const semanticConfig =
+                generation
+                    .semanticValidation;
+
+
+            const validator =
+                semanticConfig.enabled
+                    ? (() => {
+                        const ai =
+                            resolveAIProvider(
+                                config
+                            );
+
+
+                        const reviewer =
+                            new AIAssetSemanticReviewer(
+                                ai.provider,
+
+                                semanticConfig.model ??
+                                ai.model
+                            );
+
+
+                        return new SequentialAssetValidator([
+                            structuralValidator,
+
+                            new SemanticAssetValidator(
+                                reviewer,
+                                {
+                                    minimumScore:
+                                        semanticConfig
+                                            .minimumScore,
+
+                                    failOpen:
+                                        semanticConfig
+                                            .failOpen
+                                }
+                            )
+                        ]);
+                    })()
+                    : structuralValidator;
+
             const generator =
                 new AssetGenerator(
                     provider,
@@ -309,7 +366,9 @@ function resolveGeneratedAssetManager(
                         processor:
                             new AssetProcessor(),
 
-                        cache
+                        cache,
+
+                        validator
                     }
                 );
 

@@ -546,6 +546,24 @@ export function reinforcePromptAfterValidationFailure(
         );
     }
 
+    if (
+        codes.has(
+            "semantic_mismatch"
+        )
+    ) {
+        positive.push(
+            [
+                "CRITICAL SEMANTIC REQUIREMENT:",
+                "the visible subject or scene must clearly and unambiguously represent the requested concept.",
+                `Requested semantic concepts: ${request.tags.join(", ")}.`,
+                "Do not replace the requested subject with a merely related or generic alternative.",
+                "Preserve the defining visual features implied by the requested concepts."
+            ].join(
+                " "
+            )
+        );
+    }
+
     return {
         positive:
             positive.join(

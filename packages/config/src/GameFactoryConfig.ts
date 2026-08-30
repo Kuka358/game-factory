@@ -131,6 +131,20 @@ export interface ComfyUIImageGeneratorConfig {
         number;
 }
 
+export interface AssetSemanticValidationConfig {
+    enabled:
+        boolean;
+
+    model?:
+        string;
+
+    minimumScore:
+        number;
+
+    failOpen:
+        boolean;
+}
+
 export interface AssetGenerationConfig {
     /**
      * Undefined means:
@@ -150,6 +164,9 @@ export interface AssetGenerationConfig {
 
     comfyui:
         ComfyUIImageGeneratorConfig;
+
+    semanticValidation:
+        AssetSemanticValidationConfig;
 }
 
 

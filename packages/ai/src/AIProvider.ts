@@ -3,12 +3,41 @@ export type AIMessageRole =
     | "user"
     | "assistant";
 
+export interface AITextContentPart {
+    type:
+        "text";
+
+    text:
+        string;
+}
+
+
+export interface AIImageUrlContentPart {
+    type:
+        "image_url";
+
+    image_url: {
+        url:
+            string;
+    };
+}
+
+
+export type AIMessageContentPart =
+    | AITextContentPart
+    | AIImageUrlContentPart;
+
+
+export type AIMessageContent =
+    | string
+    | readonly AIMessageContentPart[];
+
 export interface AIMessage {
     role:
         AIMessageRole;
 
     content:
-        string;
+        AIMessageContent;
 }
 
 export type AIJsonSchema =

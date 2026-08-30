@@ -381,6 +381,79 @@ export function loadGameFactoryConfig(
             "GAME_FACTORY_COMFYUI_TIMEOUT_MS"
         );
 
+    const semanticValidationEnabled =
+        parseBoolean(
+            env
+                .GAME_FACTORY_ASSET_SEMANTIC_VALIDATION,
+
+            false,
+
+            "GAME_FACTORY_ASSET_SEMANTIC_VALIDATION"
+        );
+
+
+    const semanticValidationModel =
+        normalizeOptionalString(
+            env
+                .GAME_FACTORY_ASSET_SEMANTIC_MODEL
+        ) ??
+        aiModel;
+
+
+    const semanticValidationMinimumScore =
+        parseNumber(
+            env
+                .GAME_FACTORY_ASSET_SEMANTIC_MIN_SCORE,
+
+            0.65,
+
+            "GAME_FACTORY_ASSET_SEMANTIC_MIN_SCORE"
+        );
+
+
+    if (
+        semanticValidationMinimumScore <
+            0 ||
+        semanticValidationMinimumScore >
+            1
+    ) {
+        throw new Error(
+            "GAME_FACTORY_ASSET_SEMANTIC_MIN_SCORE must be between 0 and 1"
+        );
+    }
+
+
+    const semanticValidationFailOpen =
+        parseBoolean(
+            env
+                .GAME_FACTORY_ASSET_SEMANTIC_FAIL_OPEN,
+
+            true,
+
+            "GAME_FACTORY_ASSET_SEMANTIC_FAIL_OPEN"
+        );
+
+
+    if (
+        semanticValidationEnabled &&
+        aiProvider ===
+            "disabled"
+    ) {
+        throw new Error(
+            "Asset semantic validation requires GAME_FACTORY_AI_PROVIDER"
+        );
+    }
+
+
+    if (
+        semanticValidationEnabled &&
+        !semanticValidationModel
+    ) {
+        throw new Error(
+            "GAME_FACTORY_ASSET_SEMANTIC_MODEL or GAME_FACTORY_AI_MODEL is required"
+        );
+    }
+
     if (
         comfyTimeoutMs <=
         0
@@ -564,7 +637,21 @@ export function loadGameFactoryConfig(
 
                 timeoutMs:
                     comfyTimeoutMs
-            }
+            },
+
+            semanticValidation: {
+                enabled:
+                    semanticValidationEnabled,
+
+                model:
+                    semanticValidationModel,
+
+                minimumScore:
+                    semanticValidationMinimumScore,
+
+                failOpen:
+                    semanticValidationFailOpen
+            },
         }
     };
 }
@@ -797,4 +884,48 @@ function parseInteger(
     }
 
     return parsed;
+}
+
+function parseBoolean(
+    value:
+        string | undefined,
+
+    defaultValue:
+        boolean,
+
+    variableName:
+        string
+): boolean {
+    if (
+        value ===
+            undefined ||
+        value.trim() ===
+            ""
+    ) {
+        return defaultValue;
+    }
+
+
+    switch (
+        value
+            .trim()
+            .toLowerCase()
+    ) {
+        case "1":
+        case "true":
+        case "yes":
+        case "on":
+            return true;
+
+        case "0":
+        case "false":
+        case "no":
+        case "off":
+            return false;
+
+        default:
+            throw new Error(
+                `${variableName} must be a boolean`
+            );
+    }
 }

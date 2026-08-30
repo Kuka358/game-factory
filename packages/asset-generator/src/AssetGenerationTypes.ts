@@ -180,6 +180,29 @@ export interface GeneratedTilesetMetadata {
         number;
 }
 
+export interface GeneratedAssetSemanticMetadata {
+    provider:
+        string;
+
+    model:
+        string;
+
+    matches:
+        boolean;
+
+    score:
+        number;
+
+    description:
+        string;
+
+    matchedTags:
+        string[];
+
+    missingOrWrongTags:
+        string[];
+}
+
 export interface GeneratedAssetMetadata {
     origin:
         "generated";
@@ -235,6 +258,9 @@ export interface GeneratedAssetMetadata {
 
     processing:
         GeneratedAssetProcessingMetadata;
+
+    semantic?:
+        GeneratedAssetSemanticMetadata;
 
     tileset?:
         GeneratedTilesetMetadata;
