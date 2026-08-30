@@ -16,6 +16,13 @@ import type {
     PhaserAssetRegistry
 } from "../../assets/PhaserAssetRegistry.js";
 
+import {
+    generatePlatformerLevel,
+
+    type PlatformerLevelLayout,
+    type PlatformerLevelPoint
+} from "./PlatformerLevelGenerator.js";
+
 
 const GOAL_ROLE =
     "goal";
@@ -38,6 +45,9 @@ export class PlatformerScene
 
     private dead =
         false;
+
+    private levelLayout!:
+        PlatformerLevelLayout;
 
 
     constructor(
@@ -91,13 +101,21 @@ export class PlatformerScene
             height
         );
 
+        this.levelLayout =
+            generatePlatformerLevel({
+                spec:
+                    this.spec,
+
+                viewportHeight:
+                    height
+            });
+
 
         this.physics.world.setBounds(
             0,
             0,
-            this.spec
-                .platformer
-                .level_length,
+            this.levelLayout
+                .worldWidth,
             height +
                 600
         );
@@ -106,9 +124,8 @@ export class PlatformerScene
         this.cameras.main.setBounds(
             0,
             0,
-            this.spec
-                .platformer
-                .level_length,
+            this.levelLayout
+                .worldWidth,
             height
         );
 
@@ -119,17 +136,17 @@ export class PlatformerScene
 
 
         this.createPlatforms(
-            height
+            this.levelLayout
         );
-
 
         this.createPlayer(
-            height
+            this.levelLayout
+                .playerSpawn
         );
 
-
         this.createGoal(
-            height
+            this.levelLayout
+                .goal
         );
 
 
@@ -393,79 +410,18 @@ export class PlatformerScene
 
 
     private createPlatforms(
-        height:
-            number
+        layout:
+            PlatformerLevelLayout
     ): void {
-        const levelLength =
-            this.spec
-                .platformer
-                .level_length;
-
-
-        const platformWidth =
-            300;
-
-
-        const platformHeight =
-            48;
-
-
-        const gap =
-            90;
-
-
-        const step =
-            platformWidth +
-            gap;
-
-
-        const yPattern = [
-            height -
-                70,
-
-            height -
-                145,
-
-            height -
-                95,
-
-            height -
-                205,
-
-            height -
-                120
-        ];
-
-
-        let index =
-            0;
-
-
         for (
-            let x =
-                platformWidth /
-                2;
-
-            x <
-                levelLength;
-
-            x +=
-                step
+            const definition of
+            layout.platforms
         ) {
-            const y =
-                yPattern[
-                    index %
-                    yPattern.length
-                ] ??
-                height -
-                    70;
-
-
             const platform =
                 this.platforms
                     .create(
-                        x,
-                        y,
+                        definition.x,
+                        definition.y,
                         "__WHITE"
                     ) as
                     Phaser.Physics.Arcade.Image;
@@ -473,30 +429,25 @@ export class PlatformerScene
 
             platform
                 .setDisplaySize(
-                    platformWidth,
-                    platformHeight
+                    definition.width,
+                    definition.height
                 )
                 .setTint(
                     0x666666
                 )
                 .refreshBody();
-
-
-            index +=
-                1;
         }
     }
 
 
     private createPlayer(
-        height:
-            number
+        spawn:
+            PlatformerLevelPoint
     ): void {
         this.player =
             this.physics.add.image(
-                120,
-                height -
-                    160,
+                spawn.x,
+                spawn.y,
 
                 this.assets
                     .getTextureKey(
@@ -538,23 +489,14 @@ export class PlatformerScene
 
 
     private createGoal(
-        height:
-            number
+        point:
+            PlatformerLevelPoint
     ): void {
-        const x =
-            Math.max(
-                500,
-
-                this.spec
-                    .platformer
-                    .level_length -
-                    180
-            );
-
-
-        const y =
-            height -
-            180;
+        const {
+            x,
+            y
+        } =
+            point;
 
 
         if (
@@ -816,7 +758,15 @@ export class PlatformerScene
                         goal:
                             this.goal.active
                                 ? 1
-                                : 0
+                                : 0,
+
+                        level_seed:
+                            this.levelLayout
+                                .seed,
+
+                        level_width:
+                            this.levelLayout
+                                .worldWidth,
                     },
 
                     game_over:

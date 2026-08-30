@@ -36,6 +36,10 @@ import type {
     PlatformService
 } from "@game-factory/platform-core";
 
+import {
+    ARCADE_GRAVITY_Y
+} from "./physics.js";
+
 export interface CreatePhaserGameOptions {
     spec: GameSpec;
 
@@ -125,7 +129,7 @@ export function createPhaserGame(
             arcade: {
                 gravity: {
                     x: 0,
-                    y: 1200
+                    y: ARCADE_GRAVITY_Y
                 },
 
                 debug: true
