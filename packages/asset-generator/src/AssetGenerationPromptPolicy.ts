@@ -334,20 +334,26 @@ export function applyAssetGenerationProfilePolicy(
         case "tileset": {
             positive.push(
                 [
-                    "Generate exactly one reusable square terrain tile.",
-                    "One tile only.",
-                    "Fill the entire canvas edge to edge.",
-                    "Side-view 2D game terrain.",
-                    "No perspective.",
-                    "No isometric view.",
-                    "No tile grid.",
-                    "No tileset sheet.",
-                    "No isolated object presentation.",
-                    "The terrain material must occupy the complete image.",
+                    "Generate exactly one square terrain material patch.",
+                    "One texture patch only.",
+                    "This is NOT a tileset sheet.",
+                    "This is NOT a platform sprite.",
+                    "This is NOT a background scene.",
+                    "Fill every pixel of the canvas with the requested terrain material.",
+                    "Flat orthographic texture.",
+                    "No horizon.",
+                    "No top surface line.",
+                    "No platform edge.",
+                    "No cross-section.",
+                    "No straight dividing lines.",
+                    "No grid.",
+                    "No borders.",
+                    "The entire square must look like one continuous piece of material.",
                     "32-bit pixel art.",
-                    "Rich readable terrain material detail.",
+                    "Rich organic pixel detail.",
+                    "Natural irregular detail.",
                     "Consistent pixel density.",
-                    "Production-quality game terrain texture."
+                    "Production-quality game ground material."
                 ].join(
                     " "
                 )
@@ -362,6 +368,19 @@ export function applyAssetGenerationProfilePolicy(
                     "tile grid",
                     "sprite sheet",
                     "grid",
+                    "background scene",
+                    "landscape",
+                    "horizon",
+                    "horizon line",
+                    "straight horizontal line",
+                    "straight vertical line",
+                    "divider",
+                    "dividing line",
+                    "platform",
+                    "platform edge",
+                    "platform silhouette",
+                    "ground cross-section",
+                    "floating island",
                     "separate objects",
                     "characters",
                     "items",
@@ -383,10 +402,11 @@ export function applyAssetGenerationProfilePolicy(
             ) {
                 positive.push(
                     [
-                        "CRITICAL TILEABILITY REQUIREMENT:",
-                        "the tile must repeat seamlessly from left to right.",
-                        "The left edge and right edge must visually continue into each other.",
-                        "Keep terrain height, material, lighting, and texture continuous across both horizontal edges."
+                        "CRITICAL REPEAT REQUIREMENT:",
+                        "the material texture must repeat seamlessly from left to right.",
+                        "Pixels and material features near the left edge must naturally continue from the right edge.",
+                        "Keep color, lighting, texture density and material structure consistent across both horizontal edges.",
+                        "Do not create a visible boundary at either edge."
                     ].join(
                         " "
                     )
@@ -396,10 +416,10 @@ export function applyAssetGenerationProfilePolicy(
                 negative.push(
                     [
                         "visible horizontal seam",
-                        "different left and right edge heights",
-                        "broken repeating edge",
-                        "non-tileable texture",
-                        "edge discontinuity"
+                        "edge discontinuity",
+                        "different lighting at opposite edges",
+                        "different material at opposite edges",
+                        "non-tileable texture"
                     ].join(
                         ", "
                     )

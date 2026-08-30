@@ -70,6 +70,25 @@ export function buildAssetGenerationPrompt(
     }
 
     if (
+        request.kind ===
+        "tile"
+    ) {
+        positiveParts.push(
+            "single square game terrain material patch",
+            "flat orthographic material texture",
+            "material fills the entire canvas edge to edge",
+            "uniform texture region",
+            "no scene composition",
+            "no horizon",
+            "no platform silhouette",
+            "no ground cross-section",
+            "no dividing lines",
+            "no grid",
+            "suitable for repeated terrain rendering"
+        );
+    }
+
+    if (
         request.animation
     ) {
         positiveParts.push(
@@ -98,6 +117,27 @@ export function buildAssetGenerationPrompt(
         "border",
         "frame"
     ];
+
+    if (
+        request.kind ===
+        "tile"
+    ) {
+        negativeParts.push(
+            "background scene",
+            "landscape scene",
+            "horizon line",
+            "horizontal divider",
+            "vertical divider",
+            "straight dividing line",
+            "platform edge",
+            "platform silhouette",
+            "ground cross-section",
+            "floating platform",
+            "tile grid",
+            "tileset sheet",
+            "multiple tiles"
+        );
+    }
 
     if (
         request.kind ===

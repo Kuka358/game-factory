@@ -11,7 +11,7 @@ import type {
 } from "./AssetGenerationTypes.js";
 
 const PROCESSOR_VERSION =
-    "1";
+    "2";
 
 export interface AssetProcessorOptions {
     paddingRatio?:
@@ -153,7 +153,9 @@ export class AssetProcessor
 
         if (
             request.kind ===
-            "background"
+                "background" ||
+            request.kind ===
+                "tile"
         ) {
             return this.processBackground(
                 input,
@@ -164,6 +166,7 @@ export class AssetProcessor
                 request
             );
         }
+
 
         return this.processSprite(
             input,

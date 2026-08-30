@@ -6,7 +6,8 @@ import type {
 
 export type GeneratedAssetKind =
     | "sprite"
-    | "background";
+    | "background"
+    | "tile";
 
 export type GeneratedAssetFormat =
     | "png"

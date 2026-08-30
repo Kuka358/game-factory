@@ -475,6 +475,32 @@ export class TilesetGenerator
                     TILE_VARIANTS.length
                 ];
 
+            const semanticTags =
+                input.request.tags
+                    .filter(
+                        tag => {
+                            const normalized =
+                                tag
+                                    .trim()
+                                    .toLowerCase()
+                                    .replace(
+                                        /[_-]+/g,
+                                        " "
+                                    );
+
+
+                            return ![
+                                "ground tiles",
+                                "tileset",
+                                "tile set",
+                                "tile sheet",
+                                "tiles"
+                            ].includes(
+                                normalized
+                            );
+                        }
+                    );
+
 
             const generated =
                 await this.generator
@@ -486,14 +512,13 @@ export class TilesetGenerator
                             "tileset",
 
                         kind:
-                            "background",
+                            "tile",
 
                         tags: [
-                            ...input.request.tags,
+                            ...semanticTags,
 
-                            variant,
+                            variant
 
-                            `terrain tile variation ${input.tileIndex + 1}`
                         ],
 
                         style:
