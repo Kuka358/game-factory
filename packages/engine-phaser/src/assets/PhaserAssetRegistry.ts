@@ -2,7 +2,8 @@ import type Phaser from "phaser";
 
 import type {
     AssetManifest,
-    AssetManifestEntry
+    AssetManifestEntry,
+    AssetSpriteSheet
 } from "@game-factory/assets";
 
 export class PhaserAssetRegistry {
@@ -70,6 +71,19 @@ export class PhaserAssetRegistry {
         );
     }
 
+    getSpriteSheet(
+        role:
+            string
+    ): AssetSpriteSheet | undefined {
+        const asset =
+            this.getRequired(
+                role
+            );
+
+        return asset
+            .spritesheet;
+    }
+
     private getRequired(
         role: string
     ): AssetManifestEntry {
@@ -105,6 +119,26 @@ export class PhaserAssetRegistry {
 
         const url =
             asset.gamePath;
+
+        if (
+            asset.spritesheet
+        ) {
+            scene.load.spritesheet(
+                key,
+                url,
+                {
+                    frameWidth:
+                        asset.spritesheet
+                            .frameWidth,
+
+                    frameHeight:
+                        asset.spritesheet
+                            .frameHeight
+                }
+            );
+
+            return;
+        }
 
         if (extension === ".svg") {
             scene.load.svg(

@@ -8,5 +8,6 @@ export * from "./GeneratedAssetManager.js";
 export * from "./StrategicAssetManager.js";
 export * from "./AssetGenerationPromptPolicy.js";
 export * from "./SingleSubjectAssetValidator.js";
+export * from "./TilesetGenerator.js";
 
 export * from "./providers/comfyui/index.js";

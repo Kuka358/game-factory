@@ -35,6 +35,9 @@ const ENEMY_ROLE =
 const ENEMY_SPAWN_EVERY =
     3;
 
+const GROUND_TILES_ROLE =
+    "ground_tiles";
+
 export class EndlessRunnerScene
     extends Phaser.Scene
 {
@@ -238,33 +241,179 @@ export class EndlessRunnerScene
     }
 
     private createGround(
-        width: number,
-        height: number
+        width:
+            number,
+
+        height:
+            number
     ): void {
         const groundHeight =
             120;
+
 
         this.groundTop =
             height -
             groundHeight;
 
+
         this.ground =
             this.add.rectangle(
-                width / 2,
+                width /
+                    2,
 
                 this.groundTop +
-                    groundHeight / 2,
+                    groundHeight /
+                        2,
 
                 width,
+
                 groundHeight,
 
                 0x555555
             );
 
+
+        this.ground.setDepth(
+            -20
+        );
+
+
         this.physics.add.existing(
             this.ground,
             true
         );
+
+
+        if (
+            this.assets.has(
+                GROUND_TILES_ROLE
+            )
+        ) {
+            this.createGroundTileVisuals(
+                width
+            );
+        }
+    }
+
+    private createGroundTileVisuals(
+        width:
+            number
+    ): void {
+        const spritesheet =
+            this.assets.getSpriteSheet(
+                GROUND_TILES_ROLE
+            );
+
+
+        if (
+            !spritesheet
+        ) {
+            console.warn(
+                [
+                    `Asset "${GROUND_TILES_ROLE}" exists`,
+                    "but does not define spritesheet metadata."
+                ].join(
+                    " "
+                )
+            );
+
+            return;
+        }
+
+
+        const frameCount =
+            spritesheet.columns *
+            spritesheet.rows;
+
+
+        if (
+            frameCount <=
+            0
+        ) {
+            console.warn(
+                `Asset "${GROUND_TILES_ROLE}" contains no frames`
+            );
+
+            return;
+        }
+
+
+        const textureKey =
+            this.assets
+                .getTextureKey(
+                    GROUND_TILES_ROLE
+                );
+
+
+        const tileWidth =
+            spritesheet
+                .frameWidth;
+
+
+        const tileHeight =
+            spritesheet
+                .frameHeight;
+
+
+        const visibleColumns =
+            Math.ceil(
+                width /
+                tileWidth
+            ) +
+            1;
+
+
+        /*
+        * For the first vertical slice the generated atlas
+        * decorates the TOP surface of the existing physics
+        * ground.
+        *
+        * The rectangle underneath continues filling the rest
+        * of the 120px ground depth.
+        */
+        for (
+            let column =
+                0;
+
+            column <
+                visibleColumns;
+
+            column +=
+                1
+        ) {
+            const frame =
+                selectGroundFrame(
+                    column,
+                    frameCount
+                );
+
+
+            const tile =
+                this.add.image(
+                    column *
+                        tileWidth,
+
+                    this.groundTop,
+
+                    textureKey,
+
+                    frame
+                );
+
+
+            tile
+                .setOrigin(
+                    0,
+                    0
+                )
+                .setDisplaySize(
+                    tileWidth,
+                    tileHeight
+                )
+                .setDepth(
+                    -10
+                );
+        }
     }
 
     private createPlayer(): void {
@@ -1036,3 +1185,32 @@ export class EndlessRunnerScene
     }
 }
 
+function selectGroundFrame(
+    column:
+        number,
+
+    frameCount:
+        number
+): number {
+    if (
+        frameCount <=
+        1
+    ) {
+        return 0;
+    }
+
+
+    /*
+     * Deterministic variation.
+     *
+     * Avoids the ground visually changing every time the
+     * scene restarts while still preventing one frame from
+     * being repeated across the whole screen.
+     */
+    return (
+        column *
+        5 +
+        3
+    ) %
+        frameCount;
+}

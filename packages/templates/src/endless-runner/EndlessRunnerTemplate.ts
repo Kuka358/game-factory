@@ -92,6 +92,27 @@ const manifest: TemplateManifest = {
             uiKinds: [
                 "icon"
             ]
+        },
+
+        {
+            role:
+                "ground_tiles",
+
+            profile:
+                "tileset",
+
+            description:
+                [
+                    "Optional generated terrain tiles used to visually render the ground surface.",
+                    "Use it when the requested game explicitly describes",
+                    "the appearance or material of the ground, terrain, floor, road, platform or running surface.",
+                    "Examples include grass, desert sand, snow, stone, metal, alien terrain or cyberpunk flooring."
+                ].join(
+                    " "
+                ),
+
+            required:
+                false
         }
     ]
 };

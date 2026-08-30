@@ -334,56 +334,78 @@ export function applyAssetGenerationProfilePolicy(
         case "tileset": {
             positive.push(
                 [
-                    "Create a coherent reusable 2D game tileset.",
-                    "Use a strict regular grid.",
-                    "Every tile must have exactly the same dimensions.",
-                    "Tile edges must align cleanly.",
-                    "Use consistent perspective, lighting, palette, and pixel density.",
-                    "Produce modular environment pieces suitable for constructing game levels."
+                    "Generate exactly one reusable square terrain tile.",
+                    "One tile only.",
+                    "Fill the entire canvas edge to edge.",
+                    "Side-view 2D game terrain.",
+                    "No perspective.",
+                    "No isometric view.",
+                    "No tile grid.",
+                    "No tileset sheet.",
+                    "No isolated object presentation.",
+                    "The terrain material must occupy the complete image.",
+                    "32-bit pixel art.",
+                    "Rich readable terrain material detail.",
+                    "Consistent pixel density.",
+                    "Production-quality game terrain texture."
                 ].join(
                     " "
                 )
             );
 
+
             negative.push(
                 [
-                    "irregular grid",
-                    "different tile sizes",
-                    "misaligned tiles",
-                    "overlapping tiles",
-                    "random object placement",
-                    "perspective mismatch",
-                    "inconsistent pixel scale",
+                    "tileset sheet",
+                    "tile sheet",
+                    "multiple tiles",
+                    "tile grid",
+                    "sprite sheet",
+                    "grid",
+                    "separate objects",
                     "characters",
+                    "items",
                     "UI",
-                    "text"
+                    "text",
+                    "perspective",
+                    "isometric",
+                    "empty margins",
+                    "border",
+                    "frame"
                 ].join(
                     ", "
                 )
             );
+
 
             if (
                 request.tileable
             ) {
                 positive.push(
                     [
-                        "Tiles intended as repeating terrain must be seamless.",
-                        "Opposite edges should visually connect without obvious seams."
+                        "CRITICAL TILEABILITY REQUIREMENT:",
+                        "the tile must repeat seamlessly from left to right.",
+                        "The left edge and right edge must visually continue into each other.",
+                        "Keep terrain height, material, lighting, and texture continuous across both horizontal edges."
                     ].join(
                         " "
                     )
                 );
 
+
                 negative.push(
                     [
-                        "visible seams",
-                        "broken repeating edges",
-                        "non-tileable texture"
+                        "visible horizontal seam",
+                        "different left and right edge heights",
+                        "broken repeating edge",
+                        "non-tileable texture",
+                        "edge discontinuity"
                     ].join(
                         ", "
                     )
                 );
             }
+
 
             break;
         }

@@ -115,8 +115,6 @@ describe(
                 const requirements =
                     createAssetRequirements(
                         spec,
-                        endlessRunnerTemplate
-                            .manifest
                     );
 
                 expect(
@@ -147,6 +145,7 @@ describe(
                         "player",
 
                     tags: [
+                        "player",
                         "knight",
                         "medieval",
                         "pixel-art"
@@ -155,6 +154,9 @@ describe(
                     requirements: {
                         transparent:
                             true,
+
+                        orientation:
+                            "square",
 
                         dimensions: {
                             preferredWidth:
@@ -170,8 +172,16 @@ describe(
                             "jump"
                         ],
 
-                        orientation:
-                            "right"
+                        generation: {
+                            profile:
+                                "character",
+
+                            singleSubject:
+                                true,
+
+                            allowSpritesheet:
+                                false
+                        }
                     }
                 });
 
@@ -192,6 +202,7 @@ describe(
                         "obstacle",
 
                     tags: [
+                        "obstacle",
                         "spike",
                         "medieval",
                         "pixel-art"
@@ -201,6 +212,9 @@ describe(
                         transparent:
                             true,
 
+                        orientation:
+                            "square",
+
                         dimensions: {
                             preferredWidth:
                                 64,
@@ -209,8 +223,16 @@ describe(
                                 64
                         },
 
-                        orientation:
-                            "none"
+                        generation: {
+                            profile:
+                                "obstacle",
+
+                            singleSubject:
+                                true,
+
+                            allowSpritesheet:
+                                false
+                        }
                     }
                 });
 
@@ -231,6 +253,7 @@ describe(
                         "background",
 
                     tags: [
+                        "background",
                         "castle",
                         "landscape",
                         "medieval",
@@ -238,6 +261,12 @@ describe(
                     ],
 
                     requirements: {
+                        transparent:
+                            false,
+
+                        orientation:
+                            "landscape",
+
                         dimensions: {
                             preferredWidth:
                                 1280,
@@ -246,8 +275,16 @@ describe(
                                 720
                         },
 
-                        orientation:
-                            "none"
+                        generation: {
+                            profile:
+                                "background",
+
+                            singleSubject:
+                                false,
+
+                            allowSpritesheet:
+                                false
+                        }
                     }
                 });
             }

@@ -11,6 +11,20 @@ export interface AssetLicense {
     sourceUrl?: string;
 }
 
+export interface AssetSpriteSheet {
+    frameWidth:
+        number;
+
+    frameHeight:
+        number;
+
+    columns:
+        number;
+
+    rows:
+        number;
+}
+
 export interface AssetManifestEntry {
     role: string;
 
@@ -19,6 +33,9 @@ export interface AssetManifestEntry {
     source: AssetSource;
 
     sourceAssetId?: string;
+
+    spritesheet?:
+        AssetSpriteSheet;
 
     license:
         AssetLicense;

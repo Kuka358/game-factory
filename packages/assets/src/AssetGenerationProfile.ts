@@ -14,6 +14,20 @@ export type AssetUiKind =
     | "frame"
     | "bar";
 
+export interface AssetTilesetLayoutRequirements {
+    tileWidth:
+        number;
+
+    tileHeight:
+        number;
+
+    columns:
+        number;
+
+    rows:
+        number;
+}
+
 export interface AssetGenerationRequirements {
     profile?:
         AssetGenerationProfile;
@@ -36,6 +50,9 @@ export interface AssetGenerationRequirements {
      */
     tileable?:
         boolean;
+    
+    tileset?:
+        AssetTilesetLayoutRequirements;
 
     uiKind?:
         AssetUiKind;

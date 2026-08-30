@@ -395,14 +395,21 @@ function createAdditionalAssetRequirement(
                         false,
 
                     orientation:
-                        "square",
+                        "landscape",
 
+                    /*
+                    * Final atlas:
+                    *
+                    * 8 tiles × 64px
+                    * =
+                    * 512 × 64
+                    */
                     dimensions: {
                         preferredWidth:
                             512,
 
                         preferredHeight:
-                            512
+                            64
                     },
 
                     generation: {
@@ -412,11 +419,30 @@ function createAdditionalAssetRequirement(
                         singleSubject:
                             false,
 
+                        /*
+                        * The FINAL result is an atlas.
+                        * Individual generated tiles will override
+                        * this internally.
+                        */
                         allowSpritesheet:
                             true,
 
                         tileable:
-                            true
+                            true,
+
+                        tileset: {
+                            tileWidth:
+                                64,
+
+                            tileHeight:
+                                64,
+
+                            columns:
+                                8,
+
+                            rows:
+                                1
+                        }
                     }
                 }
             };

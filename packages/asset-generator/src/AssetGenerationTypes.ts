@@ -135,6 +135,32 @@ export interface GeneratedAssetProcessingMetadata {
         boolean;
 }
 
+export interface GeneratedTilesetMetadata {
+    tileWidth:
+        number;
+
+    tileHeight:
+        number;
+
+    columns:
+        number;
+
+    rows:
+        number;
+
+    generationSize:
+        number;
+
+    minimumHorizontalSeamScore:
+        number;
+
+    seamScores:
+        number[];
+
+    tileSeeds:
+        number[];
+}
+
 export interface GeneratedAssetMetadata {
     origin:
         "generated";
@@ -190,6 +216,9 @@ export interface GeneratedAssetMetadata {
 
     processing:
         GeneratedAssetProcessingMetadata;
+
+    tileset?:
+        GeneratedTilesetMetadata;
 }
 
 export interface GeneratedAsset {

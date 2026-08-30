@@ -29,6 +29,12 @@ import type {
     AssetGenerationProfile
 } from "@game-factory/assets";
 
+import {
+    TilesetGenerator,
+
+    type GeneratedTilesetGenerator
+} from "./TilesetGenerator.js";
+
 export interface GeneratedAssetManagerOptions {
     generator:
         AssetGenerator;
@@ -44,6 +50,9 @@ export interface GeneratedAssetManagerOptions {
 
     writeMetadata?:
         boolean;
+
+    tilesetGenerator?:
+        GeneratedTilesetGenerator;
 }
 
 export class GeneratedAssetManager
@@ -64,12 +73,21 @@ export class GeneratedAssetManager
     private readonly writeMetadata:
         boolean;
 
+    private readonly tilesetGenerator:
+        GeneratedTilesetGenerator;
+
     constructor(
         options:
             GeneratedAssetManagerOptions
     ) {
         this.generator =
             options.generator;
+
+        this.tilesetGenerator =
+            options.tilesetGenerator ??
+            new TilesetGenerator(
+                this.generator
+            );
 
         this.style =
             options.style;
@@ -171,60 +189,80 @@ export class GeneratedAssetManager
             requirement.type ===
                 "sprite";
 
+        const generation =
+            requirement
+                .requirements
+                .generation;
+
+
         const generated =
-            await this.generator
-                .generate({
-                    role:
-                        requirement.role,
+            profile ===
+                "tileset"
+                ? await this.tilesetGenerator
+                    .generate({
+                        role:
+                            requirement.role,
 
-                    profile:
-                        resolveGenerationProfile(
-                            requirement
-                        ),
+                        tags:
+                            requirement.tags,
 
-                    kind,
+                        style:
+                            this.style,
 
-                    tags:
-                        requirement.tags,
+                        format:
+                            this.format,
 
-                    style:
-                        this.style,
+                        generationSize:
+                            this.spriteGenerationSize,
 
-                    width:
-                        dimensions.width,
+                        layout:
+                            requireTilesetLayout(
+                                requirement
+                            )
+                    })
 
-                    height:
-                        dimensions.height,
+                : await this.generator
+                    .generate({
+                        role:
+                            requirement.role,
 
-                    transparent,
+                        profile,
 
-                    format:
-                        this.format,
+                        kind,
 
-                    singleSubject:
-                        requirement
-                            .requirements
-                            .generation
-                            ?.singleSubject,
+                        tags:
+                            requirement.tags,
 
-                    allowSpritesheet:
-                        requirement
-                            .requirements
-                            .generation
-                            ?.allowSpritesheet,
+                        style:
+                            this.style,
 
-                    tileable:
-                        requirement
-                            .requirements
-                            .generation
-                            ?.tileable,
+                        width:
+                            dimensions.width,
 
-                    uiKind:
-                        requirement
-                            .requirements
-                            .generation
-                            ?.uiKind
-                });
+                        height:
+                            dimensions.height,
+
+                        transparent,
+
+                        format:
+                            this.format,
+
+                        singleSubject:
+                            generation
+                                ?.singleSubject,
+
+                        allowSpritesheet:
+                            generation
+                                ?.allowSpritesheet,
+
+                        tileable:
+                            generation
+                                ?.tileable,
+
+                        uiKind:
+                            generation
+                                ?.uiKind
+                    });
 
         const extension =
             getGeneratedAssetExtension(
@@ -283,6 +321,35 @@ export class GeneratedAssetManager
 
             sourceAssetId:
                 `generated:${generated.metadata.generator.promptHash}`,
+
+            ...(
+                generated.metadata
+                    .tileset
+                    ? {
+                        spritesheet: {
+                            frameWidth:
+                                generated.metadata
+                                    .tileset
+                                    .tileWidth,
+
+                            frameHeight:
+                                generated.metadata
+                                    .tileset
+                                    .tileHeight,
+
+                            columns:
+                                generated.metadata
+                                    .tileset
+                                    .columns,
+
+                            rows:
+                                generated.metadata
+                                    .tileset
+                                    .rows
+                        }
+                    }
+                    : {}
+            ),
 
             license: {
                 type:
@@ -508,4 +575,32 @@ function resolveGenerationProfile(
         case "image":
             return "background";
     }
+}
+
+function requireTilesetLayout(
+    requirement:
+        AssetRequirement
+) {
+    const layout =
+        requirement
+            .requirements
+            .generation
+            ?.tileset;
+
+
+    if (
+        !layout
+    ) {
+        throw new Error(
+            [
+                `Tileset asset "${requirement.role}"`,
+                "does not define generation.tileset layout"
+            ].join(
+                " "
+            )
+        );
+    }
+
+
+    return layout;
 }
