@@ -45,9 +45,11 @@ type PhaserTemplateFactory = (
 ) => Phaser.Scene;
 
 const templateFactories:
-    Record<
-        TemplateId,
-        PhaserTemplateFactory
+    Partial<
+        Record<
+            TemplateId,
+            PhaserTemplateFactory
+        >
     > = {
         endless_runner:
             ({

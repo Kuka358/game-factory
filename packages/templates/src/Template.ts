@@ -43,7 +43,8 @@ export interface TemplateAdditionalAssetCapability {
 }
 
 export type TemplateId =
-    | "endless_runner";
+    | "endless_runner"
+    | "platformer";
 
 export interface TemplateManifest {
     id:
