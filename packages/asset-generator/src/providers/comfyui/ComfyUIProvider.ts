@@ -665,6 +665,17 @@ function replacePlaceholders(
         typeof value ===
         "string"
     ) {
+        /*
+        * Exact placeholder replacement preserves the
+        * original value type.
+        *
+        * This is important for numeric ComfyUI inputs:
+        *
+        * "__GF_SEED__" -> 123
+        * "__GF_WIDTH__" -> 512
+        *
+        * rather than strings "123" / "512".
+        */
         if (
             replacements.has(
                 value
@@ -675,7 +686,46 @@ function replacePlaceholders(
             );
         }
 
-        return value;
+        /*
+        * Text inputs may embed placeholders inside a larger
+        * prompt:
+        *
+        * "__GF_PROMPT__, exactly one character..."
+        *
+        * Previously these placeholders were never replaced,
+        * causing ComfyUI to receive the literal token
+        * "__GF_PROMPT__" instead of the requested subject.
+        */
+        let result =
+            value;
+
+        for (
+            const [
+                placeholder,
+                replacement
+            ] of replacements
+        ) {
+            if (
+                !result.includes(
+                    placeholder
+                )
+            ) {
+                continue;
+            }
+
+            result =
+                result
+                    .split(
+                        placeholder
+                    )
+                    .join(
+                        String(
+                            replacement
+                        )
+                    );
+        }
+
+        return result;
     }
 
     if (

@@ -376,6 +376,9 @@ function createProfileWorkflows(
                 AssetGenerationProfile,
 
             workflowPath:
+                string | undefined,
+
+            profileModel:
                 string | undefined
         ) => {
             if (
@@ -389,7 +392,9 @@ function createProfileWorkflows(
 
                 workflowPath,
 
-                model,
+                model:
+                    profileModel ??
+                    model,
 
                 outputNodeId:
                     comfy.outputNodeId,
@@ -401,37 +406,44 @@ function createProfileWorkflows(
 
     add(
         "character",
-        comfy.characterWorkflowPath
+        comfy.characterWorkflowPath,
+        comfy.characterModel
     );
 
     add(
         "npc",
-        comfy.npcWorkflowPath
+        comfy.npcWorkflowPath,
+        comfy.npcModel
     );
 
     add(
         "item",
-        comfy.itemWorkflowPath
+        comfy.itemWorkflowPath,
+        comfy.itemModel
     );
 
     add(
         "obstacle",
-        comfy.obstacleWorkflowPath
+        comfy.obstacleWorkflowPath,
+        comfy.obstacleModel
     );
 
     add(
         "background",
-        comfy.backgroundWorkflowPath
+        comfy.backgroundWorkflowPath,
+        comfy.backgroundModel
     );
 
     add(
         "ui",
-        comfy.uiWorkflowPath
+        comfy.uiWorkflowPath,
+        comfy.uiModel
     );
 
     add(
         "tileset",
-        comfy.tilesetWorkflowPath
+        comfy.tilesetWorkflowPath,
+        comfy.tilesetModel
     );
 
     return workflows;

@@ -103,6 +103,27 @@ export interface ComfyUIImageGeneratorConfig {
     model?:
         string;
 
+    characterModel?:
+        string;
+
+    npcModel?:
+        string;
+
+    itemModel?:
+        string;
+
+    obstacleModel?:
+        string;
+
+    backgroundModel?:
+        string;
+
+    uiModel?:
+        string;
+
+    tilesetModel?:
+        string;
+
     outputNodeId?:
         string;
 

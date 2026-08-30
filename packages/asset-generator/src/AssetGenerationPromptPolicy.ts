@@ -39,7 +39,14 @@ export function applyAssetGenerationProfilePolicy(
                     "One pose only.",
                     "One full body subject.",
                     "Centered composition.",
-                    "Clear readable silhouette."
+                    "Clear readable silhouette.",
+                    "32-bit pixel art.",
+                    "High-detail production-quality game sprite.",
+                    "Use rich but readable internal pixel detail.",
+                    "Use layered clothing, armor, equipment, accessories, seams, straps, buckles, or mechanical features when appropriate.",
+                    "Render different materials such as cloth, metal, leather, glass, skin, hair, or glowing technology distinctly.",
+                    "Use controlled internal shadows, highlights, and secondary color regions.",
+                    "Preserve fine internal detail without adding additional subjects."
                 ].join(
                     " "
                 )
@@ -72,7 +79,14 @@ export function applyAssetGenerationProfilePolicy(
                     "Exactly one NPC character.",
                     "Single isolated game character.",
                     "One pose only.",
-                    "Centered full body sprite."
+                    "Centered full body sprite.",
+                    "32-bit pixel art.",
+                    "High-detail production-quality game sprite.",
+                    "Use rich but readable internal pixel detail.",
+                    "Add distinctive anatomy, armor, clothing, scales, bones, mechanical parts, markings, horns, claws, or equipment where appropriate.",
+                    "Make the NPC visually specific rather than a generic silhouette.",
+                    "Use controlled internal shadows, highlights, texture, and secondary color regions.",
+                    "Preserve exactly one visible subject."
                 ].join(
                     " "
                 )
@@ -100,7 +114,13 @@ export function applyAssetGenerationProfilePolicy(
                     "Exactly one isolated game item.",
                     "Single object only.",
                     "Centered object.",
-                    "No environment around the item."
+                    "No environment around the item.",
+                    "32-bit pixel art.",
+                    "High-detail production-quality game item.",
+                    "Use rich but readable internal pixel detail.",
+                    "Add material texture, decorative edges, engravings, facets, caps, handles, reflections, wear, or magical accents where appropriate.",
+                    "Use controlled highlights, shadows, and coherent secondary color regions.",
+                    "Keep the result readable as exactly one isolated item."
                 ].join(
                     " "
                 )
@@ -130,7 +150,13 @@ export function applyAssetGenerationProfilePolicy(
                     "Exactly one isolated physical game obstacle.",
                     "Single object only.",
                     "Grounded readable silhouette.",
-                    "Centered."
+                    "Centered.",
+                    "32-bit pixel art.",
+                    "High-detail production-quality game obstacle.",
+                    "Use rich but readable internal pixel detail.",
+                    "Add construction details, joints, cracks, bolts, planks, spikes, surface wear, texture, or mechanical parts where appropriate.",
+                    "Show clearly differentiated materials and internal shading.",
+                    "Preserve a strong readable outer silhouette and exactly one object."
                 ].join(
                     " "
                 )
@@ -183,7 +209,13 @@ export function applyAssetGenerationProfilePolicy(
                 [
                     "Generate exactly one standalone game UI element.",
                     "Single isolated interface asset.",
+                    "32-bit pixel art.",
+                    "Polished production-quality game UI asset.",
                     "Clean readable silhouette.",
+                    "Use rich but controlled pixel detail.",
+                    "Use deliberate borders, internal shading, highlights, material accents, and secondary color regions where appropriate.",
+                    "Maintain very strong readability at actual game UI size.",
+                    "Do not add decorative objects outside the requested UI element.",
                     "No complete HUD or UI kit.",
                     "No text unless explicitly requested."
                 ].join(

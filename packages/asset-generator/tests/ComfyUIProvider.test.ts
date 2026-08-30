@@ -19,7 +19,7 @@ const workflow:
 
         inputs: {
             text:
-                "__GF_PROMPT__"
+                "__GF_PROMPT__, exactly one character, full body"
         }
     },
 
@@ -29,7 +29,7 @@ const workflow:
 
         inputs: {
             text:
-                "__GF_NEGATIVE_PROMPT__"
+                "__GF_NEGATIVE_PROMPT__, sprite sheet, multiple poses"
         }
     },
 
@@ -215,7 +215,7 @@ describe(
                         "1"
                     ].inputs.text
                 ).toBe(
-                    "pixel art knight"
+                    "pixel art knight, exactly one character, full body"
                 );
 
                 expect(
@@ -223,7 +223,7 @@ describe(
                         "2"
                     ].inputs.text
                 ).toBe(
-                    "text, watermark"
+                    "text, watermark, sprite sheet, multiple poses"
                 );
 
                 expect(

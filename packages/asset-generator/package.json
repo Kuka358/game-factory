@@ -14,7 +14,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "benchmark:quality": "pnpm build && node scripts/benchmark-models.mjs",
+    "benchmark:detail": "pnpm build && node scripts/benchmark-detail.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

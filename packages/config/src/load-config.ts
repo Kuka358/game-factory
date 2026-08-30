@@ -322,6 +322,48 @@ export function loadGameFactoryConfig(
             env
                 .GAME_FACTORY_COMFYUI_MODEL
         );
+    
+    const comfyCharacterModel =
+        normalizeOptionalString(
+            env
+                .GAME_FACTORY_COMFYUI_CHARACTER_MODEL
+        );
+
+    const comfyNpcModel =
+        normalizeOptionalString(
+            env
+                .GAME_FACTORY_COMFYUI_NPC_MODEL
+        );
+
+    const comfyItemModel =
+        normalizeOptionalString(
+            env
+                .GAME_FACTORY_COMFYUI_ITEM_MODEL
+        );
+
+    const comfyObstacleModel =
+        normalizeOptionalString(
+            env
+                .GAME_FACTORY_COMFYUI_OBSTACLE_MODEL
+        );
+
+    const comfyBackgroundModel =
+        normalizeOptionalString(
+            env
+                .GAME_FACTORY_COMFYUI_BACKGROUND_MODEL
+        );
+
+    const comfyUiModel =
+        normalizeOptionalString(
+            env
+                .GAME_FACTORY_COMFYUI_UI_MODEL
+        );
+
+    const comfyTilesetModel =
+        normalizeOptionalString(
+            env
+                .GAME_FACTORY_COMFYUI_TILESET_MODEL
+        );
 
     const comfyOutputNode =
         normalizeOptionalString(
@@ -495,6 +537,27 @@ export function loadGameFactoryConfig(
 
                 model:
                     comfyModel,
+
+                characterModel:
+                    comfyCharacterModel,
+
+                npcModel:
+                    comfyNpcModel,
+
+                itemModel:
+                    comfyItemModel,
+
+                obstacleModel:
+                    comfyObstacleModel,
+
+                backgroundModel:
+                    comfyBackgroundModel,
+
+                uiModel:
+                    comfyUiModel,
+
+                tilesetModel:
+                    comfyTilesetModel,
 
                 outputNodeId:
                     comfyOutputNode,

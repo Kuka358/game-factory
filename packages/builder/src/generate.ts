@@ -25,6 +25,9 @@ import type {
     AssetManager,
     AssetRequirement
 } from "@game-factory/assets";
+import {
+    createHash
+} from "node:crypto";
 
 export interface GenerateInput {
     spec: GameSpec;
@@ -170,17 +173,133 @@ export async function generate(
 }
 
 function createGameId(
-    title: string
+    title:
+        string
 ): string {
-    return title
-        .trim()
-        .toLowerCase()
-        .replace(
-            /[^a-z0-9]+/g,
-            "-"
+    const transliterated =
+        transliterateRussian(
+            title
+        );
+
+    const slug =
+        transliterated
+            .normalize(
+                "NFKD"
+            )
+            .replace(
+                /[\u0300-\u036f]/g,
+                ""
+            )
+            .trim()
+            .toLowerCase()
+            .replace(
+                /[^a-z0-9]+/g,
+                "-"
+            )
+            .replace(
+                /^-+|-+$/g,
+                ""
+            )
+            .replace(
+                /-+/g,
+                "-"
+            );
+
+    if (
+        slug
+    ) {
+        return slug;
+    }
+
+    /*
+     * Fallback for titles written entirely in languages
+     * we do not transliterate, for example Chinese or
+     * Japanese.
+     */
+    const hash =
+        createHash(
+            "sha256"
         )
-        .replace(
-            /^-+|-+$/g,
+            .update(
+                title
+            )
+            .digest(
+                "hex"
+            )
+            .slice(
+                0,
+                12
+            );
+
+    return `game-${hash}`;
+}
+
+
+function transliterateRussian(
+    value:
+        string
+): string {
+    const map:
+        Readonly<
+            Record<
+                string,
+                string
+            >
+        > = {
+        а: "a",
+        б: "b",
+        в: "v",
+        г: "g",
+        д: "d",
+        е: "e",
+        ё: "yo",
+        ж: "zh",
+        з: "z",
+        и: "i",
+        й: "y",
+        к: "k",
+        л: "l",
+        м: "m",
+        н: "n",
+        о: "o",
+        п: "p",
+        р: "r",
+        с: "s",
+        т: "t",
+        у: "u",
+        ф: "f",
+        х: "kh",
+        ц: "ts",
+        ч: "ch",
+        ш: "sh",
+        щ: "sch",
+        ъ: "",
+        ы: "y",
+        ь: "",
+        э: "e",
+        ю: "yu",
+        я: "ya"
+    };
+
+    return [
+        ...value
+    ]
+        .map(
+            (character) => {
+                const lower =
+                    character
+                        .toLowerCase();
+
+                const replacement =
+                    map[
+                        lower
+                    ];
+
+                return replacement ??
+                    character;
+            }
+        )
+        .join(
             ""
         );
 }
