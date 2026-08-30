@@ -172,6 +172,12 @@ export interface GeneratedTilesetMetadata {
 
     averageInterTileSeamScore:
         number;
+
+    requiredMinimumInterTileSeamScore:
+        number;
+
+    atlasRepairCount:
+        number;
 }
 
 export interface GeneratedAssetMetadata {

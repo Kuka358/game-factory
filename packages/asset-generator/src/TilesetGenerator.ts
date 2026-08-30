@@ -37,6 +37,13 @@ const DEFAULT_MAX_ATTEMPTS_PER_TILE =
 const DEFAULT_MINIMUM_SEAM_SCORE =
     72;
 
+const DEFAULT_MINIMUM_INTER_TILE_SEAM_SCORE =
+    60;
+
+
+const DEFAULT_MAX_ATLAS_REPAIR_ATTEMPTS =
+    4;
+
 
 const TILE_VARIANTS = [
     "clean base terrain",
@@ -89,6 +96,12 @@ export interface TilesetGenerationRequest {
         number;
 
     minimumHorizontalSeamScore?:
+        number;
+
+    minimumInterTileSeamScore?:
+        number;
+
+    maxAtlasRepairAttempts?:
         number;
 }
 
@@ -180,6 +193,15 @@ export class TilesetGenerator
         const minimumSeamScore =
             request.minimumHorizontalSeamScore ??
             DEFAULT_MINIMUM_SEAM_SCORE;
+        
+        const minimumInterTileSeamScore =
+            request.minimumInterTileSeamScore ??
+            DEFAULT_MINIMUM_INTER_TILE_SEAM_SCORE;
+
+
+        const maxAtlasRepairAttempts =
+            request.maxAtlasRepairAttempts ??
+            DEFAULT_MAX_ATLAS_REPAIR_ATTEMPTS;
 
 
         const tileCount =
@@ -218,10 +240,14 @@ export class TilesetGenerator
             );
         }
 
-        const ordered =
+        let ordered =
             await orderTilesForBestHorizontalSeams(
                 tiles
             );
+
+
+        let atlasRepairCount =
+            0;
 
 
         console.log(
@@ -234,6 +260,149 @@ export class TilesetGenerator
                 " "
             )
         );
+
+
+        while (
+            ordered.minimumScore <
+                minimumInterTileSeamScore &&
+            atlasRepairCount <
+                maxAtlasRepairAttempts
+        ) {
+            const target =
+                selectAtlasRepairTarget(
+                    ordered,
+                    atlasRepairCount
+                );
+
+
+            if (
+                !target
+            ) {
+                break;
+            }
+
+
+            const previousSeed =
+                target.asset
+                    .metadata
+                    .generator
+                    .seed;
+
+
+            const repairSeed =
+                deriveAtlasRepairSeed(
+                    previousSeed,
+                    atlasRepairCount +
+                        1
+                );
+
+
+            console.warn(
+                [
+                    "[tileset-generator]",
+                    `atlas-repair=${atlasRepairCount + 1}/${maxAtlasRepairAttempts}`,
+                    `worst=${ordered.minimumScore.toFixed(2)}`,
+                    `required=${minimumInterTileSeamScore}`,
+                    `replace-source-tile=${target.sourceIndex}`,
+                    `old-seed=${previousSeed}`,
+                    `new-seed=${repairSeed}`
+                ].join(
+                    " "
+                )
+            );
+
+
+            const replacement =
+                await this.generateTile({
+                    request,
+
+                    tileIndex:
+                        target.sourceIndex,
+
+                    generationSize,
+
+                    maxAttempts,
+
+                    minimumSeamScore,
+
+                    format,
+
+                    initialSeed:
+                        repairSeed
+                });
+
+
+            const storageIndex =
+                tiles.findIndex(
+                    tile =>
+                        tile.sourceIndex ===
+                        target.sourceIndex
+                );
+
+
+            if (
+                storageIndex <
+                0
+            ) {
+                throw new Error(
+                    [
+                        "Unable to replace tileset tile",
+                        `${target.sourceIndex}:`,
+                        "source tile not found"
+                    ].join(
+                        " "
+                    )
+                );
+            }
+
+
+            tiles[
+                storageIndex
+            ] =
+                replacement;
+
+
+            atlasRepairCount +=
+                1;
+
+
+            ordered =
+                await orderTilesForBestHorizontalSeams(
+                    tiles
+                );
+
+
+            console.log(
+                [
+                    "[tileset-generator]",
+                    `atlas-repair=${atlasRepairCount}`,
+                    `order=${ordered.tileOrder.join(",")}`,
+                    `inter-seam-min=${ordered.minimumScore.toFixed(2)}`,
+                    `inter-seam-avg=${ordered.averageScore.toFixed(2)}`
+                ].join(
+                    " "
+                )
+            );
+        }
+
+
+        if (
+            ordered.minimumScore <
+            minimumInterTileSeamScore
+        ) {
+            console.warn(
+                [
+                    "[tileset-generator]",
+                    "atlas repair budget exhausted",
+                    `repairs=${atlasRepairCount}`,
+                    `inter-seam-min=${ordered.minimumScore.toFixed(2)}`,
+                    `required=${minimumInterTileSeamScore}`,
+                    "using best available atlas"
+                ].join(
+                    " "
+                )
+            );
+        }
 
 
         const atlasBytes =
@@ -311,6 +480,11 @@ export class TilesetGenerator
                                 .generator
                                 .promptHash
                     ),
+
+                requiredMinimumInterTileSeamScore:
+                    minimumInterTileSeamScore,
+
+                atlasRepairCount,
 
                 seamScores
             });
@@ -488,7 +662,12 @@ export class TilesetGenerator
                         ordered.minimumScore,
 
                     averageInterTileSeamScore:
-                        ordered.averageScore
+                        ordered.averageScore,
+
+                    requiredMinimumInterTileSeamScore:
+                        minimumInterTileSeamScore,
+
+                    atlasRepairCount
                 }
             }
         };
@@ -514,6 +693,9 @@ export class TilesetGenerator
 
             format:
                 GeneratedAssetFormat;
+
+            initialSeed?:
+                number;
         }
     ): Promise<GeneratedTileCandidate> {
         let best:
@@ -523,7 +705,8 @@ export class TilesetGenerator
 
         let retrySeed:
             number |
-            undefined;
+            undefined =
+            input.initialSeed;
 
 
         for (
@@ -1819,6 +2002,28 @@ async function assembleAtlas(
         .toBuffer();
 }
 
+function deriveAtlasRepairSeed(
+    baseSeed:
+        number,
+
+    repairAttempt:
+        number
+): number {
+    const value =
+        (
+            baseSeed +
+            repairAttempt *
+                10_000_019
+        ) %
+        2_147_483_647;
+
+
+    return Math.max(
+        1,
+        value
+    );
+}
+
 
 function deriveRetrySeed(
     baseSeed:
@@ -1990,6 +2195,38 @@ function validateRequest(
     ) {
         throw new Error(
             "Tileset minimumHorizontalSeamScore must be between 0 and 100"
+        );
+    }
+
+    if (
+        request.minimumInterTileSeamScore !==
+            undefined &&
+        (
+            request.minimumInterTileSeamScore <
+                0 ||
+            request.minimumInterTileSeamScore >
+                100
+        )
+    ) {
+        throw new Error(
+            "Tileset minimumInterTileSeamScore must be between 0 and 100"
+        );
+    }
+
+
+    if (
+        request.maxAtlasRepairAttempts !==
+            undefined &&
+        (
+            !Number.isInteger(
+                request.maxAtlasRepairAttempts
+            ) ||
+            request.maxAtlasRepairAttempts <
+                0
+        )
+    ) {
+        throw new Error(
+            "Tileset maxAtlasRepairAttempts must be a non-negative integer"
         );
     }
 }
@@ -2635,6 +2872,126 @@ interface OrderedTiles {
 
     averageScore:
         number;
+}
+
+function selectAtlasRepairTarget(
+    ordered:
+        OrderedTiles,
+
+    repairAttempt:
+        number
+): GeneratedTileCandidate | undefined {
+    if (
+        ordered.tiles.length ===
+            0 ||
+        ordered.transitionScores.length ===
+            0
+    ) {
+        return undefined;
+    }
+
+
+    let worstTransitionIndex =
+        0;
+
+
+    let worstScore =
+        Number.POSITIVE_INFINITY;
+
+
+    for (
+        let index =
+            0;
+
+        index <
+            ordered.transitionScores.length;
+
+        index +=
+            1
+    ) {
+        const score =
+            ordered.transitionScores[
+                index
+            ];
+
+
+        if (
+            score ===
+            undefined
+        ) {
+            continue;
+        }
+
+
+        if (
+            score <
+            worstScore
+        ) {
+            worstScore =
+                score;
+
+            worstTransitionIndex =
+                index;
+        }
+    }
+
+
+    const from =
+        ordered.tiles[
+            worstTransitionIndex
+        ];
+
+
+    const to =
+        ordered.tiles[
+            (
+                worstTransitionIndex +
+                1
+            ) %
+            ordered.tiles.length
+        ];
+
+
+    if (
+        !from
+    ) {
+        return to;
+    }
+
+
+    if (
+        !to
+    ) {
+        return from;
+    }
+
+
+    /*
+     * First try replacing the weaker standalone tile.
+     *
+     * On the next repair round prefer the opposite side
+     * of the bad transition so we do not regenerate the
+     * same endpoint forever.
+     */
+    const weaker =
+        from.seamScore <=
+            to.seamScore
+            ? from
+            : to;
+
+
+    const stronger =
+        weaker ===
+            from
+            ? to
+            : from;
+
+
+    return repairAttempt %
+            2 ===
+        0
+        ? weaker
+        : stronger;
 }
 
 
