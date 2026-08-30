@@ -160,6 +160,18 @@ export interface GeneratedTilesetMetadata {
 
     tileSeeds:
         number[];
+
+    tileOrder:
+        number[];
+
+    interTileSeamScores:
+        number[];
+
+    minimumInterTileSeamScore:
+        number;
+
+    averageInterTileSeamScore:
+        number;
 }
 
 export interface GeneratedAssetMetadata {

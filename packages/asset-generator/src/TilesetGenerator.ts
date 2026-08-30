@@ -101,6 +101,9 @@ export interface GeneratedTilesetGenerator {
 
 
 interface GeneratedTileCandidate {
+    sourceIndex:
+        number;
+
     asset:
         GeneratedAsset;
 
@@ -186,10 +189,27 @@ export class TilesetGenerator
             );
         }
 
+        const ordered =
+            await orderTilesForBestHorizontalSeams(
+                tiles
+            );
+
+
+        console.log(
+            [
+                "[tileset-generator]",
+                `order=${ordered.tileOrder.join(",")}`,
+                `inter-seam-min=${ordered.minimumScore.toFixed(2)}`,
+                `inter-seam-avg=${ordered.averageScore.toFixed(2)}`
+            ].join(
+                " "
+            )
+        );
+
 
         const atlasBytes =
             await assembleAtlas(
-                tiles.map(
+                ordered.tiles.map(
                     tile =>
                         tile.bytes
                 ),
@@ -211,7 +231,7 @@ export class TilesetGenerator
 
 
         const first =
-            tiles[0];
+            ordered.tiles[0];
 
 
         if (
@@ -224,7 +244,7 @@ export class TilesetGenerator
 
 
         const tileSeeds =
-            tiles.map(
+            ordered.tiles.map(
                 tile =>
                     tile.asset
                         .metadata
@@ -234,7 +254,7 @@ export class TilesetGenerator
 
 
         const seamScores =
-            tiles.map(
+            ordered.tiles.map(
                 tile =>
                     tile.seamScore
             );
@@ -248,8 +268,14 @@ export class TilesetGenerator
                 layout:
                     request.layout,
 
+                tileOrder:
+                    ordered.tileOrder,
+
+                interTileSeamScores:
+                    ordered.transitionScores,
+
                 promptHashes:
-                    tiles.map(
+                    ordered.tiles.map(
                         tile =>
                             tile.asset
                                 .metadata
@@ -421,7 +447,19 @@ export class TilesetGenerator
 
                     seamScores,
 
-                    tileSeeds
+                    tileSeeds,
+
+                    tileOrder:
+                        ordered.tileOrder,
+
+                    interTileSeamScores:
+                        ordered.transitionScores,
+
+                    minimumInterTileSeamScore:
+                        ordered.minimumScore,
+
+                    averageInterTileSeamScore:
+                        ordered.averageScore
                 }
             }
         };
@@ -586,6 +624,9 @@ export class TilesetGenerator
 
             const candidate:
                 GeneratedTileCandidate = {
+                sourceIndex:
+                    input.tileIndex,
+
                 asset:
                     generated,
 
@@ -840,6 +881,179 @@ export async function calculateHorizontalSeamScore(
                 255 *
                 100
             )
+        ).toFixed(
+            2
+        )
+    );
+}
+
+export async function calculateInterTileSeamScore(
+    leftBytes:
+        Uint8Array,
+
+    rightBytes:
+        Uint8Array,
+
+    edgeWidth =
+        4
+): Promise<number> {
+    const [
+        left,
+        right
+    ] =
+        await Promise.all([
+            decodeRgba(
+                leftBytes
+            ),
+
+            decodeRgba(
+                rightBytes
+            )
+        ]);
+
+
+    if (
+        left.height !==
+        right.height
+    ) {
+        return 0;
+    }
+
+
+    const resolvedEdgeWidth =
+        Math.max(
+            1,
+
+            Math.min(
+                edgeWidth,
+                left.width,
+                right.width
+            )
+        );
+
+
+    let difference =
+        0;
+
+    let samples =
+        0;
+
+
+    for (
+        let y =
+            0;
+
+        y <
+            left.height;
+
+        y +=
+            1
+    ) {
+        for (
+            let edge =
+                0;
+
+            edge <
+                resolvedEdgeWidth;
+
+            edge +=
+                1
+        ) {
+            const leftX =
+                left.width -
+                resolvedEdgeWidth +
+                edge;
+
+
+            const rightX =
+                edge;
+
+
+            const leftIndex =
+                (
+                    y *
+                    left.width +
+                    leftX
+                ) *
+                left.channels;
+
+
+            const rightIndex =
+                (
+                    y *
+                    right.width +
+                    rightX
+                ) *
+                right.channels;
+
+
+            for (
+                let channel =
+                    0;
+
+                channel <
+                    3;
+
+                channel +=
+                    1
+            ) {
+                const leftValue =
+                    left.data[
+                        leftIndex +
+                        channel
+                    ];
+
+
+                const rightValue =
+                    right.data[
+                        rightIndex +
+                        channel
+                    ];
+
+
+                if (
+                    leftValue ===
+                        undefined ||
+                    rightValue ===
+                        undefined
+                ) {
+                    continue;
+                }
+
+
+                difference +=
+                    Math.abs(
+                        leftValue -
+                        rightValue
+                    );
+
+
+                samples +=
+                    1;
+            }
+        }
+    }
+
+
+    if (
+        samples ===
+        0
+    ) {
+        return 0;
+    }
+
+
+    const averageDifference =
+        difference /
+        samples;
+
+
+    return Number(
+        (
+            100 -
+            averageDifference /
+                255 *
+                100
         ).toFixed(
             2
         )
@@ -1175,4 +1389,831 @@ function validateRequest(
             "Tileset minimumHorizontalSeamScore must be between 0 and 100"
         );
     }
+}
+
+interface DecodedRgbaImage {
+    data:
+        Buffer;
+
+    width:
+        number;
+
+    height:
+        number;
+
+    channels:
+        number;
+}
+
+
+async function decodeRgba(
+    bytes:
+        Uint8Array
+): Promise<DecodedRgbaImage> {
+    const decoded =
+        await sharp(
+            Buffer.from(
+                bytes
+            )
+        )
+            .ensureAlpha()
+            .raw()
+            .toBuffer({
+                resolveWithObject:
+                    true
+            });
+
+
+    return {
+        data:
+            decoded.data,
+
+        width:
+            decoded.info.width,
+
+        height:
+            decoded.info.height,
+
+        channels:
+            decoded.info.channels
+    };
+}
+
+export interface CyclicTileOrder {
+    order:
+        number[];
+
+    transitionScores:
+        number[];
+
+    minimumScore:
+        number;
+
+    averageScore:
+        number;
+}
+
+
+export function findBestCyclicTileOrder(
+    tileCount:
+        number,
+
+    getScore:
+        (
+            from:
+                number,
+
+            to:
+                number
+        ) => number
+): CyclicTileOrder {
+    if (
+        tileCount <=
+        0
+    ) {
+        return {
+            order:
+                [],
+
+            transitionScores:
+                [],
+
+            minimumScore:
+                0,
+
+            averageScore:
+                0
+        };
+    }
+
+
+    if (
+        tileCount ===
+        1
+    ) {
+        return evaluateTileOrder(
+            [
+                0
+            ],
+            getScore
+        );
+    }
+
+
+    /*
+     * Exact search is cheap for our current 8-frame atlas:
+     *
+     * fixing frame 0 removes rotational duplicates:
+     * 7! = 5040 candidates.
+     */
+    if (
+        tileCount <=
+        9
+    ) {
+        const tail =
+            Array.from(
+                {
+                    length:
+                        tileCount -
+                        1
+                },
+
+                (
+                    _,
+                    index
+                ) =>
+                    index +
+                    1
+            );
+
+
+        let best:
+            CyclicTileOrder |
+            undefined;
+
+
+        forEachPermutation(
+            tail,
+
+            permutation => {
+                const candidate =
+                    evaluateTileOrder(
+                        [
+                            0,
+                            ...permutation
+                        ],
+
+                        getScore
+                    );
+
+
+                if (
+                    isBetterOrder(
+                        candidate,
+                        best
+                    )
+                ) {
+                    best =
+                        candidate;
+                }
+            }
+        );
+
+
+        if (
+            best
+        ) {
+            return best;
+        }
+    }
+
+
+    /*
+     * Fallback for future large atlases where factorial
+     * search would be unreasonable.
+     */
+    let best:
+        CyclicTileOrder |
+        undefined;
+
+
+    for (
+        let start =
+            0;
+
+        start <
+            tileCount;
+
+        start +=
+            1
+    ) {
+        const order =
+            buildGreedyOrder(
+                start,
+                tileCount,
+                getScore
+            );
+
+
+        const candidate =
+            evaluateTileOrder(
+                order,
+                getScore
+            );
+
+
+        if (
+            isBetterOrder(
+                candidate,
+                best
+            )
+        ) {
+            best =
+                candidate;
+        }
+    }
+
+
+    if (
+        !best
+    ) {
+        throw new Error(
+            "Unable to determine tileset frame order"
+        );
+    }
+
+
+    return best;
+}
+
+function evaluateTileOrder(
+    order:
+        readonly number[],
+
+    getScore:
+        (
+            from:
+                number,
+
+            to:
+                number
+        ) => number
+): CyclicTileOrder {
+    if (
+        order.length ===
+        0
+    ) {
+        return {
+            order:
+                [],
+
+            transitionScores:
+                [],
+
+            minimumScore:
+                0,
+
+            averageScore:
+                0
+        };
+    }
+
+
+    const transitionScores:
+        number[] =
+        [];
+
+
+    for (
+        let index =
+            0;
+
+        index <
+            order.length;
+
+        index +=
+            1
+    ) {
+        const from =
+            order[
+                index
+            ];
+
+
+        const to =
+            order[
+                (
+                    index +
+                    1
+                ) %
+                order.length
+            ];
+
+
+        if (
+            from ===
+                undefined ||
+            to ===
+                undefined
+        ) {
+            throw new Error(
+                "Invalid tileset order"
+            );
+        }
+
+
+        transitionScores.push(
+            getScore(
+                from,
+                to
+            )
+        );
+    }
+
+
+    const minimumScore =
+        Math.min(
+            ...transitionScores
+        );
+
+
+    const averageScore =
+        transitionScores.reduce(
+            (
+                sum,
+                score
+            ) =>
+                sum +
+                score,
+
+            0
+        ) /
+        transitionScores.length;
+
+
+    return {
+        order: [
+            ...order
+        ],
+
+        transitionScores:
+            transitionScores.map(
+                score =>
+                    Number(
+                        score.toFixed(
+                            2
+                        )
+                    )
+            ),
+
+        minimumScore:
+            Number(
+                minimumScore.toFixed(
+                    2
+                )
+            ),
+
+        averageScore:
+            Number(
+                averageScore.toFixed(
+                    2
+                )
+            )
+    };
+}
+
+
+function isBetterOrder(
+    candidate:
+        CyclicTileOrder,
+
+    current:
+        CyclicTileOrder |
+        undefined
+): boolean {
+    if (
+        !current
+    ) {
+        return true;
+    }
+
+
+    /*
+     * Prefer eliminating the single worst visible seam.
+     * Average quality is only the tie-breaker.
+     */
+    if (
+        candidate.minimumScore !==
+        current.minimumScore
+    ) {
+        return candidate.minimumScore >
+            current.minimumScore;
+    }
+
+
+    return candidate.averageScore >
+        current.averageScore;
+}
+
+
+function forEachPermutation(
+    values:
+        readonly number[],
+
+    visit:
+        (
+            permutation:
+                number[]
+        ) => void
+): void {
+    const used =
+        new Array<boolean>(
+            values.length
+        ).fill(
+            false
+        );
+
+
+    const current:
+        number[] =
+        [];
+
+
+    const recurse =
+        (): void => {
+            if (
+                current.length ===
+                values.length
+            ) {
+                visit(
+                    [
+                        ...current
+                    ]
+                );
+
+                return;
+            }
+
+
+            for (
+                let index =
+                    0;
+
+                index <
+                    values.length;
+
+                index +=
+                    1
+            ) {
+                if (
+                    used[
+                        index
+                    ]
+                ) {
+                    continue;
+                }
+
+
+                const value =
+                    values[
+                        index
+                    ];
+
+
+                if (
+                    value ===
+                    undefined
+                ) {
+                    continue;
+                }
+
+
+                used[
+                    index
+                ] =
+                    true;
+
+
+                current.push(
+                    value
+                );
+
+
+                recurse();
+
+
+                current.pop();
+
+
+                used[
+                    index
+                ] =
+                    false;
+            }
+        };
+
+
+    recurse();
+}
+
+
+function buildGreedyOrder(
+    start:
+        number,
+
+    tileCount:
+        number,
+
+    getScore:
+        (
+            from:
+                number,
+
+            to:
+                number
+        ) => number
+): number[] {
+    const remaining =
+        new Set<number>();
+
+
+    for (
+        let index =
+            0;
+
+        index <
+            tileCount;
+
+        index +=
+            1
+    ) {
+        if (
+            index !==
+            start
+        ) {
+            remaining.add(
+                index
+            );
+        }
+    }
+
+
+    const order = [
+        start
+    ];
+
+
+    while (
+        remaining.size >
+        0
+    ) {
+        const current =
+            order[
+                order.length -
+                1
+            ];
+
+
+        if (
+            current ===
+            undefined
+        ) {
+            break;
+        }
+
+
+        let bestNext:
+            number |
+            undefined;
+
+
+        let bestScore =
+            Number.NEGATIVE_INFINITY;
+
+
+        for (
+            const candidate of
+            remaining
+        ) {
+            const score =
+                getScore(
+                    current,
+                    candidate
+                );
+
+
+            if (
+                score >
+                bestScore
+            ) {
+                bestScore =
+                    score;
+
+                bestNext =
+                    candidate;
+            }
+        }
+
+
+        if (
+            bestNext ===
+            undefined
+        ) {
+            break;
+        }
+
+
+        order.push(
+            bestNext
+        );
+
+
+        remaining.delete(
+            bestNext
+        );
+    }
+
+
+    return order;
+}
+
+interface OrderedTiles {
+    tiles:
+        GeneratedTileCandidate[];
+
+    tileOrder:
+        number[];
+
+    transitionScores:
+        number[];
+
+    minimumScore:
+        number;
+
+    averageScore:
+        number;
+}
+
+
+async function orderTilesForBestHorizontalSeams(
+    tiles:
+        readonly GeneratedTileCandidate[]
+): Promise<OrderedTiles> {
+    if (
+        tiles.length ===
+        0
+    ) {
+        return {
+            tiles:
+                [],
+
+            tileOrder:
+                [],
+
+            transitionScores:
+                [],
+
+            minimumScore:
+                0,
+
+            averageScore:
+                0
+        };
+    }
+
+
+    const scores =
+        new Map<
+            string,
+            number
+        >();
+
+
+    for (
+        let from =
+            0;
+
+        from <
+            tiles.length;
+
+        from +=
+            1
+    ) {
+        const fromTile =
+            tiles[
+                from
+            ];
+
+
+        if (
+            !fromTile
+        ) {
+            continue;
+        }
+
+
+        for (
+            let to =
+                0;
+
+            to <
+                tiles.length;
+
+            to +=
+                1
+        ) {
+            const toTile =
+                tiles[
+                    to
+                ];
+
+
+            if (
+                !toTile
+            ) {
+                continue;
+            }
+
+
+            const score =
+                from ===
+                    to
+                    ? fromTile
+                        .seamScore
+                    : await calculateInterTileSeamScore(
+                        fromTile.bytes,
+                        toTile.bytes
+                    );
+
+
+            scores.set(
+                pairKey(
+                    from,
+                    to
+                ),
+
+                score
+            );
+        }
+    }
+
+
+    const ordering =
+        findBestCyclicTileOrder(
+            tiles.length,
+
+            (
+                from,
+                to
+            ) =>
+                scores.get(
+                    pairKey(
+                        from,
+                        to
+                    )
+                ) ??
+                0
+        );
+
+
+    const orderedTiles:
+        GeneratedTileCandidate[] =
+        [];
+
+
+    for (
+        const index of
+        ordering.order
+    ) {
+        const tile =
+            tiles[
+                index
+            ];
+
+
+        if (
+            !tile
+        ) {
+            throw new Error(
+                `Tileset ordering referenced missing tile ${index}`
+            );
+        }
+
+
+        orderedTiles.push(
+            tile
+        );
+    }
+
+
+    return {
+        tiles:
+            orderedTiles,
+
+        tileOrder:
+            orderedTiles.map(
+                tile =>
+                    tile.sourceIndex
+            ),
+
+        transitionScores:
+            ordering.transitionScores,
+
+        minimumScore:
+            ordering.minimumScore,
+
+        averageScore:
+            ordering.averageScore
+    };
+}
+
+
+function pairKey(
+    from:
+        number,
+
+    to:
+        number
+): string {
+    return `${from}:${to}`;
 }
