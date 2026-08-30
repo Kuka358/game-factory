@@ -1,7 +1,7 @@
 import type { JSONSchemaType } from "ajv";
-import type { GameSpec } from "./types.js";
+import type { EndlessRunnerGameSpec } from "./types.js";
 
-export const gameSpecSchema: JSONSchemaType<GameSpec> = {
+export const gameSpecSchema: JSONSchemaType<EndlessRunnerGameSpec> = {
     type: "object",
     additionalProperties: false,
 

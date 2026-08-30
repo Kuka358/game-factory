@@ -11,7 +11,8 @@
   "dependencies": {
     "@game-factory/engine-phaser": "workspace:*",
     "@game-factory/game-spec": "workspace:*",
-    "@game-factory/assets": "workspace:*"
+    "@game-factory/assets": "workspace:*",
+    "@game-factory/platform-web": "workspace:*"
   },
   "devDependencies": {
     "vite": "^7"

@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 
 import type {
-    GameSpec
+    EndlessRunnerGameSpec
 } from "@game-factory/game-spec";
 
 import type {
@@ -43,7 +43,7 @@ export class EndlessRunnerScene
 {
     constructor(
         private readonly spec:
-            GameSpec,
+            EndlessRunnerGameSpec,
 
         private readonly ctx:
             GameContext,

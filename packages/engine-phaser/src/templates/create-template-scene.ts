@@ -1,7 +1,9 @@
 import type Phaser from "phaser";
 
-import type {
-    GameSpec
+import {
+    isEndlessRunnerGameSpec,
+
+    type GameSpec
 } from "@game-factory/game-spec";
 
 import type {
@@ -53,13 +55,30 @@ const templateFactories:
                 ctx,
                 input,
                 assets
-            }) =>
-                new EndlessRunnerScene(
+            }) => {
+                if (
+                    !isEndlessRunnerGameSpec(
+                        spec
+                    )
+                ) {
+                    throw new Error(
+                        [
+                            "Template endless_runner received incompatible GameSpec:",
+                            spec.game.genre
+                        ].join(
+                            " "
+                        )
+                    );
+                }
+
+
+                return new EndlessRunnerScene(
                     spec,
                     ctx,
                     input,
                     assets
-                )
+                );
+            }
     };
 
 export function createTemplateScene(

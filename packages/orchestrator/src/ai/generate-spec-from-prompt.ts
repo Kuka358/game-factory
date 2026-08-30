@@ -12,8 +12,11 @@ import {
     type PromptRegistry
 } from "@game-factory/ai";
 
-import type {
-    GameSpec
+import {
+    isEndlessRunnerGameSpec,
+    isPlatformerGameSpec,
+
+    type GameSpec
 } from "@game-factory/game-spec";
 
 import {
@@ -422,15 +425,46 @@ function applyOrientationOverride(
         return spec;
     }
 
-    return {
-        ...spec,
 
-        game: {
-            ...spec.game,
-
-            orientation
+    if (
+        isPlatformerGameSpec(
+            spec
+        )
+    ) {
+        if (
+            orientation !==
+            "landscape"
+        ) {
+            throw new Error(
+                "Platformer currently supports landscape orientation only"
+            );
         }
-    };
+
+
+        return spec;
+    }
+
+
+    if (
+        isEndlessRunnerGameSpec(
+            spec
+        )
+    ) {
+        return {
+            ...spec,
+
+            game: {
+                ...spec.game,
+
+                orientation
+            }
+        };
+    }
+
+
+    throw new Error(
+        "Unsupported GameSpec"
+    );
 }
 
 

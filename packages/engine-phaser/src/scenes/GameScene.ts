@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import type { GameSpec } from "@game-factory/game-spec";
+import type { EndlessRunnerGameSpec } from "@game-factory/game-spec";
 import type {
     GameContext,
     ScoreChangedEvent
@@ -10,7 +10,7 @@ import {
 
 export class GameScene extends Phaser.Scene {
     constructor(
-        private readonly spec: GameSpec,
+        private readonly spec: EndlessRunnerGameSpec,
         private readonly ctx: GameContext,
         private readonly inputAdapter: PhaserInputService
     ) {

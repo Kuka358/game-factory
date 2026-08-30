@@ -3,6 +3,9 @@ import { createPhaserGame } from "@game-factory/engine-phaser";
 import type {
     AssetManifest
 } from "@game-factory/assets";
+import {
+    BrowserMockPlatform
+} from "@game-factory/platform-web";
 
 const spec: GameSpec = {
     schema_version: "1.0",
@@ -40,6 +43,38 @@ const spec: GameSpec = {
         world_speed: 150,
         obstacle_spawn_interval_ms: 1800,
         speed_increase_per_second: 6.4
+    },
+
+    assets: {
+        style:
+            "pixel-art",
+
+        global_tags: [
+            "medieval",
+            "fantasy"
+        ],
+
+        roles: {
+            player: {
+                tags: [
+                    "knight"
+                ]
+            },
+
+            obstacle: {
+                tags: [
+                    "rock",
+                    "spikes"
+                ]
+            },
+
+            background: {
+                tags: [
+                    "castle",
+                    "forest"
+                ]
+            }
+        }
     }
 };
 
@@ -96,6 +131,12 @@ const assetManifest:
     ]
 };
 
+const platform =
+    new BrowserMockPlatform();
+
+
+await platform.init();
+
 createPhaserGame({
     spec,
 
@@ -105,5 +146,7 @@ createPhaserGame({
     assetManifest,
 
     parent:
-        "game"
+        "game",
+
+    platform
 });

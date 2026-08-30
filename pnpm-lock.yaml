@@ -64,6 +64,9 @@ importers:
       '@game-factory/game-spec':
         specifier: workspace:*
         version: link:../../packages/game-spec
+      '@game-factory/platform-web':
+        specifier: workspace:*
+        version: link:../../packages/platform-web
     devDependencies:
       vite:
         specifier: ^7
