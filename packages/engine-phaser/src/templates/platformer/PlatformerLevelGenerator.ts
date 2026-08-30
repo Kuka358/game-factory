@@ -62,6 +62,19 @@ export interface PlatformerLevelPoint {
         number;
 }
 
+export interface PlatformerLevelEntity {
+    index:
+        number;
+
+    platformIndex:
+        number;
+
+    x:
+        number;
+
+    y:
+        number;
+}
 
 export interface PlatformerLevelLayout {
     seed:
@@ -78,6 +91,12 @@ export interface PlatformerLevelLayout {
 
     goal:
         PlatformerLevelPoint;
+
+    hazards:
+        PlatformerLevelEntity[];
+
+    collectibles:
+        PlatformerLevelEntity[];
 }
 
 
@@ -429,6 +448,173 @@ export function generatePlatformerLevel(
             48
     };
 
+    const hazards:
+        PlatformerLevelEntity[] =
+        [];
+
+    const collectibles:
+        PlatformerLevelEntity[] =
+        [];
+
+
+    /*
+    * Separate random streams are intentional.
+    *
+    * Changing enemy density must not change collectible
+    * placement, and neither may change platform geometry.
+    */
+    const hazardRandom =
+        createSeededRandom(
+            mixSeed(
+                spec.generation.seed,
+                0x48415a44
+            )
+        );
+
+    const collectibleRandom =
+        createSeededRandom(
+            mixSeed(
+                spec.generation.seed,
+                0x434f4c4c
+            )
+        );
+
+
+    for (
+        const platform of
+        platforms
+    ) {
+        /*
+        * Keep the starting area and finish platform safe.
+        */
+        if (
+            platform.index <
+                2 ||
+            platform.index ===
+                platforms.length -
+                    1
+        ) {
+            continue;
+        }
+
+
+        let hazard:
+            PlatformerLevelEntity |
+            undefined;
+
+
+        if (
+            hazardRandom() <
+            clamp(
+                settings.enemy_density,
+                0,
+                1
+            )
+        ) {
+            const x =
+                randomPlatformPosition(
+                    platform,
+                    hazardRandom
+                );
+
+
+            hazard = {
+                index:
+                    hazards.length,
+
+                platformIndex:
+                    platform.index,
+
+                x,
+
+                /*
+                * Hazard sprites are rendered at roughly
+                * 64px high.
+                */
+                y:
+                    topEdge(
+                        platform
+                    ) -
+                    32
+            };
+
+
+            hazards.push(
+                hazard
+            );
+        }
+
+
+        if (
+            collectibleRandom() >=
+            clamp(
+                settings.collectible_density,
+                0,
+                1
+            )
+        ) {
+            continue;
+        }
+
+
+        let collectibleX =
+            randomPlatformPosition(
+                platform,
+                collectibleRandom
+            );
+
+
+        /*
+        * If this platform also contains a hazard, bias the
+        * collectible toward the opposite half so we do not
+        * create unavoidable enemy/item overlaps.
+        */
+        if (
+            hazard
+        ) {
+            const offset =
+                Math.min(
+                    96,
+                    platform.width *
+                        0.28
+                );
+
+
+            collectibleX =
+                hazard.x <
+                    platform.x
+                    ? platform.x +
+                        offset
+                    : platform.x -
+                        offset;
+
+
+            collectibleX =
+                clampPlatformPosition(
+                    platform,
+                    collectibleX
+                );
+        }
+
+
+        collectibles.push({
+            index:
+                collectibles.length,
+
+            platformIndex:
+                platform.index,
+
+            x:
+                collectibleX,
+
+            y:
+                topEdge(
+                    platform
+                ) -
+                76
+        });
+    }
+
 
     return {
         seed:
@@ -448,7 +634,11 @@ export function generatePlatformerLevel(
 
         playerSpawn,
 
-        goal
+        goal,
+
+        hazards,
+
+        collectibles
     };
 }
 
@@ -736,6 +926,134 @@ function randomGridAlignedInteger(
     );
 }
 
+function mixSeed(
+    seed:
+        number,
+
+    salt:
+        number
+): number {
+    let value =
+        (
+            seed ^
+            salt
+        ) |
+        0;
+
+
+    value =
+        Math.imul(
+            value ^
+                (
+                    value >>>
+                    16
+                ),
+
+            0x45d9f3b
+        );
+
+
+    value =
+        Math.imul(
+            value ^
+                (
+                    value >>>
+                    16
+                ),
+
+            0x45d9f3b
+        );
+
+
+    return (
+        value ^
+        (
+            value >>>
+            16
+        )
+    ) |
+    0;
+}
+
+
+function randomPlatformPosition(
+    platform:
+        PlatformerLevelPlatform,
+
+    random:
+        () => number
+): number {
+    const margin =
+        Math.min(
+            72,
+
+            platform.width *
+                0.22
+        );
+
+
+    const minimum =
+        leftEdge(
+            platform
+        ) +
+        margin;
+
+    const maximum =
+        rightEdge(
+            platform
+        ) -
+        margin;
+
+
+    if (
+        maximum <=
+        minimum
+    ) {
+        return platform.x;
+    }
+
+
+    return (
+        minimum +
+        random() *
+            (
+                maximum -
+                minimum
+            )
+    );
+}
+
+
+function clampPlatformPosition(
+    platform:
+        PlatformerLevelPlatform,
+
+    value:
+        number
+): number {
+    const margin =
+        Math.min(
+            72,
+
+            platform.width *
+                0.22
+        );
+
+
+    return clamp(
+        value,
+
+        leftEdge(
+            platform
+        ) +
+            margin,
+
+        rightEdge(
+            platform
+        ) -
+            margin
+    );
+}
 
 function leftEdge(
     platform:

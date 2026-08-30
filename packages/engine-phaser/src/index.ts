@@ -9,5 +9,6 @@ export {
     type GeneratePlatformerLevelInput,
     type PlatformerLevelLayout,
     type PlatformerLevelPlatform,
-    type PlatformerLevelPoint
+    type PlatformerLevelPoint,
+    type PlatformerLevelEntity
 } from "./templates/platformer/PlatformerLevelGenerator.js";

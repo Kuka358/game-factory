@@ -5,7 +5,8 @@ import type {
 } from "@game-factory/game-spec";
 
 import type {
-    GameContext
+    GameContext,
+    ScoreChangedEvent
 } from "@game-factory/runtime";
 
 import type {
@@ -19,6 +20,7 @@ import type {
 import {
     generatePlatformerLevel,
 
+    type PlatformerLevelEntity,
     type PlatformerLevelLayout,
     type PlatformerLevelPlatform,
     type PlatformerLevelPoint
@@ -30,6 +32,18 @@ const GOAL_ROLE =
 
 const LEVEL_TILES_ROLE =
     "level_tiles";
+
+const ENEMY_ROLE =
+    "enemy";
+
+const COLLECTIBLE_ROLE =
+    "collectible";
+
+const SCORE_ICON_ROLE =
+    "score_icon";
+
+const COLLECTIBLE_SCORE =
+    10;
 
 interface LevelTilesRenderConfig {
     textureKey:
@@ -63,6 +77,18 @@ export class PlatformerScene
 
     private levelLayout!:
         PlatformerLevelLayout;
+
+    private hazards!:
+        Phaser.GameObjects.Group;
+
+    private collectibles?:
+        Phaser.GameObjects.Group;
+
+    private scoreText!:
+        Phaser.GameObjects.Text;
+
+    private scoreIcon?:
+        Phaser.GameObjects.Image;
 
 
     constructor(
@@ -164,11 +190,61 @@ export class PlatformerScene
                 .goal
         );
 
+        this.hazards =
+            this.add.group();
+
+
+        if (
+            this.assets.has(
+                COLLECTIBLE_ROLE
+            )
+        ) {
+            this.collectibles =
+                this.add.group();
+        } else {
+            this.collectibles =
+                undefined;
+        }
+
+
+        this.createLevelEntities(
+            this.levelLayout
+        );
 
         this.physics.add.collider(
             this.player,
             this.platforms
         );
+
+        this.physics.add.collider(
+            this.player,
+            this.hazards,
+            () => {
+                this.handleDeath(
+                    "YOU DIED"
+                );
+            }
+        );
+
+
+        if (
+            this.collectibles
+        ) {
+            this.physics.add.overlap(
+                this.player,
+                this.collectibles,
+
+                (
+                    _player,
+                    collectible
+                ) => {
+                    this.collectCollectible(
+                        collectible as
+                            Phaser.Physics.Arcade.Image
+                    );
+                }
+            );
+        }
 
 
         this.physics.add.overlap(
@@ -195,6 +271,12 @@ export class PlatformerScene
                 160
             );
 
+        this.createScoreHud();
+
+
+        const unsubscribeScore =
+            this.registerScoreEvents();
+
 
         this.ctx.score.reset();
 
@@ -208,6 +290,8 @@ export class PlatformerScene
                 .SHUTDOWN,
             () => {
                 unregisterDebug();
+
+                unsubscribeScore();
 
                 this.inputAdapter
                     .detach();
@@ -272,6 +356,295 @@ export class PlatformerScene
         }
     }
 
+    private createLevelEntities(
+        layout:
+            PlatformerLevelLayout
+    ): void {
+        for (
+            const definition of
+            layout.hazards
+        ) {
+            this.createHazard(
+                definition
+            );
+        }
+
+
+        if (
+            !this.collectibles
+        ) {
+            return;
+        }
+
+
+        for (
+            const definition of
+            layout.collectibles
+        ) {
+            this.createCollectible(
+                definition
+            );
+        }
+    }
+
+
+    private createHazard(
+        definition:
+            PlatformerLevelEntity
+    ): void {
+        /*
+        * NPC art is preferred when requested.
+        *
+        * Otherwise the mandatory obstacle asset is the
+        * deterministic fallback, so enemy_density still
+        * affects gameplay even without an additional NPC.
+        */
+        const assetRole =
+            this.assets.has(
+                ENEMY_ROLE
+            )
+                ? ENEMY_ROLE
+                : "obstacle";
+
+
+        const hazard =
+            this.physics.add.image(
+                definition.x,
+                definition.y,
+
+                this.assets
+                    .getTextureKey(
+                        assetRole
+                    )
+            );
+
+
+        this.fitImageToBox(
+            hazard,
+            56,
+            64
+        );
+
+
+        hazard
+            .setImmovable(
+                true
+            );
+
+
+        const body =
+            hazard.body as
+                Phaser.Physics.Arcade.Body;
+
+
+        body.setAllowGravity(
+            false
+        );
+
+
+        body.setSize(
+            hazard.displayWidth *
+                0.7,
+
+            hazard.displayHeight *
+                0.86,
+
+            true
+        );
+
+
+        hazard.setData(
+            "hazardRole",
+            assetRole
+        );
+
+
+        this.hazards.add(
+            hazard
+        );
+    }
+
+
+    private createCollectible(
+        definition:
+            PlatformerLevelEntity
+    ): void {
+        if (
+            !this.collectibles
+        ) {
+            return;
+        }
+
+
+        const collectible =
+            this.physics.add.image(
+                definition.x,
+                definition.y,
+
+                this.assets
+                    .getTextureKey(
+                        COLLECTIBLE_ROLE
+                    )
+            );
+
+
+        this.fitImageToBox(
+            collectible,
+            40,
+            40
+        );
+
+
+        collectible
+            .setImmovable(
+                true
+            );
+
+
+        const body =
+            collectible.body as
+                Phaser.Physics.Arcade.Body;
+
+
+        body.setAllowGravity(
+            false
+        );
+
+
+        body.setSize(
+            collectible.displayWidth *
+                0.75,
+
+            collectible.displayHeight *
+                0.75,
+
+            true
+        );
+
+
+        this.collectibles.add(
+            collectible
+        );
+    }
+
+
+    private collectCollectible(
+        collectible:
+            Phaser.Physics.Arcade.Image
+    ): void {
+        if (
+            !collectible.active ||
+            this.finished ||
+            this.dead
+        ) {
+            return;
+        }
+
+
+        collectible.disableBody(
+            true,
+            true
+        );
+
+
+        this.ctx.score.add(
+            COLLECTIBLE_SCORE
+        );
+    }
+
+    private createScoreHud():
+        void
+    {
+        let textX =
+            24;
+
+
+        if (
+            this.assets.has(
+                SCORE_ICON_ROLE
+            )
+        ) {
+            this.scoreIcon =
+                this.add.image(
+                    24,
+                    38,
+
+                    this.assets
+                        .getTextureKey(
+                            SCORE_ICON_ROLE
+                        )
+                );
+
+
+            this.fitImageToBox(
+                this.scoreIcon,
+                32,
+                32
+            );
+
+
+            this.scoreIcon
+                .setOrigin(
+                    0,
+                    0.5
+                )
+                .setScrollFactor(
+                    0
+                )
+                .setDepth(
+                    1000
+                );
+
+
+            textX =
+                68;
+        }
+
+
+        this.scoreText =
+            this.add.text(
+                textX,
+                24,
+
+                "Score: 0",
+
+                {
+                    fontSize:
+                        "28px",
+
+                    color:
+                        "#ffffff"
+                }
+            );
+
+
+        this.scoreText
+            .setScrollFactor(
+                0
+            )
+            .setDepth(
+                1000
+            );
+    }
+
+
+    private registerScoreEvents():
+        () => void
+    {
+        return this.ctx.events
+            .on<ScoreChangedEvent>(
+                "score.changed",
+
+                ({
+                    value
+                }) => {
+                    this.scoreText
+                        .setText(
+                            `Score: ${value}`
+                        );
+                }
+            );
+    }
 
     private updateMovement():
         void
@@ -852,8 +1225,11 @@ export class PlatformerScene
     }
 
 
-    private handleDeath():
-        void
+    private handleDeath(
+        message:
+            string =
+            "YOU FELL"
+    ): void
     {
         if (
             this.dead
@@ -876,7 +1252,7 @@ export class PlatformerScene
             this.scale.height /
                 2,
 
-            "YOU FELL",
+            message,
             {
                 fontSize:
                     "48px",
@@ -979,6 +1355,16 @@ export class PlatformerScene
                         level_width:
                             this.levelLayout
                                 .worldWidth,
+
+                        hazard:
+                            this.countActiveEntities(
+                                this.hazards
+                            ),
+
+                        collectible:
+                            this.countActiveEntities(
+                                this.collectibles
+                            ),
                     },
 
                     game_over:
@@ -986,6 +1372,27 @@ export class PlatformerScene
                         this.finished
                 })
             );
+    }
+
+    private countActiveEntities(
+        group:
+            Phaser.GameObjects.Group |
+            undefined
+    ): number {
+        if (
+            !group
+        ) {
+            return 0;
+        }
+
+
+        return group
+            .getChildren()
+            .filter(
+                child =>
+                    child.active
+            )
+            .length;
     }
 
 
