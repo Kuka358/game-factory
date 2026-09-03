@@ -198,6 +198,9 @@ describe(
                         enemy_density:
                             0.15,
 
+                        hazard_density:
+                            0.2,
+
                         collectible_density:
                             0.25
                     },

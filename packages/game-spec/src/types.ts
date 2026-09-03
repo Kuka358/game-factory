@@ -245,6 +245,9 @@ export interface PlatformerSpec {
     enemy_density:
         number;
 
+    hazard_density:
+        number;
+
     collectible_density:
         number;
 }

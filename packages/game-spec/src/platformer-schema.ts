@@ -370,6 +370,17 @@ export const platformerGameSpecSchema:
                         1
                 },
 
+                hazard_density: {
+                    type:
+                        "number",
+
+                    minimum:
+                        0,
+
+                    maximum:
+                        1
+                },
+
                 collectible_density: {
                     type:
                         "number",

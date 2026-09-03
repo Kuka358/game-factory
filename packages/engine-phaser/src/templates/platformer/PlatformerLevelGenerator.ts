@@ -92,6 +92,9 @@ export interface PlatformerLevelLayout {
     goal:
         PlatformerLevelPoint;
 
+    enemies:
+        PlatformerLevelEntity[];
+
     hazards:
         PlatformerLevelEntity[];
 
@@ -448,6 +451,10 @@ export function generatePlatformerLevel(
             48
     };
 
+    const enemies:
+        PlatformerLevelEntity[] =
+        [];
+
     const hazards:
         PlatformerLevelEntity[] =
         [];
@@ -458,11 +465,19 @@ export function generatePlatformerLevel(
 
 
     /*
-    * Separate random streams are intentional.
+    * Each entity category gets its own deterministic stream.
     *
-    * Changing enemy density must not change collectible
-    * placement, and neither may change platform geometry.
+    * Changing one density must not change platform geometry
+    * or shuffle the other categories.
     */
+    const enemyRandom =
+        createSeededRandom(
+            mixSeed(
+                spec.generation.seed,
+                0x454e4d59
+            )
+        );
+
     const hazardRandom =
         createSeededRandom(
             mixSeed(
@@ -485,7 +500,7 @@ export function generatePlatformerLevel(
         platforms
     ) {
         /*
-        * Keep the starting area and finish platform safe.
+        * Keep spawn area and finish platform safe.
         */
         if (
             platform.index <
@@ -498,39 +513,55 @@ export function generatePlatformerLevel(
         }
 
 
-        let hazard:
+        /*
+        * Always consume the same amount of random values
+        * per platform so changing density doesn't shuffle
+        * later positions.
+        */
+        const enemyRoll =
+            enemyRandom();
+
+        const enemyX =
+            randomPlatformPosition(
+                platform,
+                enemyRandom
+            );
+
+
+        const hazardRoll =
+            hazardRandom();
+
+        const hazardX =
+            randomPlatformPosition(
+                platform,
+                hazardRandom
+            );
+
+
+        let danger:
             PlatformerLevelEntity |
             undefined;
 
 
         if (
-            hazardRandom() <
+            enemyRoll <
             clamp(
                 settings.enemy_density,
                 0,
                 1
             )
         ) {
-            const x =
-                randomPlatformPosition(
-                    platform,
-                    hazardRandom
-                );
-
-
-            hazard = {
+            const enemy:
+                PlatformerLevelEntity = {
                 index:
-                    hazards.length,
+                    enemies.length,
 
                 platformIndex:
                     platform.index,
 
-                x,
+                x:
+                    enemyX,
 
-                /*
-                * Hazard sprites are rendered at roughly
-                * 64px high.
-                */
                 y:
                     topEdge(
                         platform
@@ -539,9 +570,52 @@ export function generatePlatformerLevel(
             };
 
 
+            enemies.push(
+                enemy
+            );
+
+
+            danger =
+                enemy;
+        } else if (
+            hazardRoll <
+            clamp(
+                settings.hazard_density,
+                0,
+                1
+            )
+        ) {
+            /*
+            * Only one danger per platform for the first
+            * platformer version. This keeps procedural
+            * layouts readable and avoids unfair combinations.
+            */
+            const hazard:
+                PlatformerLevelEntity = {
+                index:
+                    hazards.length,
+
+                platformIndex:
+                    platform.index,
+
+                x:
+                    hazardX,
+
+                y:
+                    topEdge(
+                        platform
+                    ) -
+                    20
+            };
+
+
             hazards.push(
                 hazard
             );
+
+
+            danger =
+                hazard;
         }
 
 
@@ -564,24 +638,20 @@ export function generatePlatformerLevel(
             );
 
 
-        /*
-        * If this platform also contains a hazard, bias the
-        * collectible toward the opposite half so we do not
-        * create unavoidable enemy/item overlaps.
-        */
         if (
-            hazard
+            danger
         ) {
             const offset =
                 Math.min(
                     96,
+
                     platform.width *
                         0.28
                 );
 
 
             collectibleX =
-                hazard.x <
+                danger.x <
                     platform.x
                     ? platform.x +
                         offset
@@ -637,6 +707,8 @@ export function generatePlatformerLevel(
         goal,
 
         hazards,
+
+        enemies,
 
         collectibles
     };

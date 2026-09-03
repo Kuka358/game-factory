@@ -78,6 +78,9 @@ export class PlatformerScene
     private levelLayout!:
         PlatformerLevelLayout;
 
+    private enemies!:
+        Phaser.GameObjects.Group;
+
     private hazards!:
         Phaser.GameObjects.Group;
 
@@ -190,6 +193,9 @@ export class PlatformerScene
                 .goal
         );
 
+        this.enemies =
+            this.add.group();
+
         this.hazards =
             this.add.group();
 
@@ -218,10 +224,21 @@ export class PlatformerScene
 
         this.physics.add.collider(
             this.player,
-            this.hazards,
+            this.enemies,
             () => {
                 this.handleDeath(
                     "YOU DIED"
+                );
+            }
+        );
+
+
+        this.physics.add.collider(
+            this.player,
+            this.hazards,
+            () => {
+                this.handleDeath(
+                    "WATCH THE HAZARDS"
                 );
             }
         );
@@ -362,6 +379,16 @@ export class PlatformerScene
     ): void {
         for (
             const definition of
+            layout.enemies
+        ) {
+            this.createEnemy(
+                definition
+            );
+        }
+
+
+        for (
+            const definition of
             layout.hazards
         ) {
             this.createHazard(
@@ -387,26 +414,86 @@ export class PlatformerScene
         }
     }
 
+    private createEnemy(
+        definition:
+            PlatformerLevelEntity
+    ): void {
+        const hasGeneratedEnemy =
+            this.assets.has(
+                ENEMY_ROLE
+            );
+
+
+        const enemy =
+            this.physics.add.image(
+                definition.x,
+                definition.y,
+
+                hasGeneratedEnemy
+                    ? this.assets
+                        .getTextureKey(
+                            ENEMY_ROLE
+                        )
+                    : "__WHITE"
+            );
+
+
+        if (
+            hasGeneratedEnemy
+        ) {
+            this.fitImageToBox(
+                enemy,
+                56,
+                64
+            );
+        } else {
+            enemy
+                .setDisplaySize(
+                    48,
+                    56
+                )
+                .setTint(
+                    0xaa3333
+                );
+        }
+
+
+        enemy.setImmovable(
+            true
+        );
+
+
+        const body =
+            enemy.body as
+                Phaser.Physics.Arcade.Body;
+
+
+        body.setAllowGravity(
+            false
+        );
+
+
+        body.setSize(
+            enemy.displayWidth *
+                0.7,
+
+            enemy.displayHeight *
+                0.86,
+
+            true
+        );
+
+
+        this.enemies.add(
+            enemy
+        );
+    }
+
 
     private createHazard(
         definition:
             PlatformerLevelEntity
     ): void {
-        /*
-        * NPC art is preferred when requested.
-        *
-        * Otherwise the mandatory obstacle asset is the
-        * deterministic fallback, so enemy_density still
-        * affects gameplay even without an additional NPC.
-        */
-        const assetRole =
-            this.assets.has(
-                ENEMY_ROLE
-            )
-                ? ENEMY_ROLE
-                : "obstacle";
-
-
         const hazard =
             this.physics.add.image(
                 definition.x,
@@ -414,22 +501,21 @@ export class PlatformerScene
 
                 this.assets
                     .getTextureKey(
-                        assetRole
+                        "obstacle"
                     )
             );
 
 
         this.fitImageToBox(
             hazard,
-            56,
-            64
+            48,
+            40
         );
 
 
-        hazard
-            .setImmovable(
-                true
-            );
+        hazard.setImmovable(
+            true
+        );
 
 
         const body =
@@ -444,18 +530,12 @@ export class PlatformerScene
 
         body.setSize(
             hazard.displayWidth *
-                0.7,
+                0.8,
 
             hazard.displayHeight *
-                0.86,
+                0.72,
 
             true
-        );
-
-
-        hazard.setData(
-            "hazardRole",
-            assetRole
         );
 
 
@@ -1355,6 +1435,11 @@ export class PlatformerScene
                         level_width:
                             this.levelLayout
                                 .worldWidth,
+
+                        enemy:
+                            this.countActiveEntities(
+                                this.enemies
+                            ),
 
                         hazard:
                             this.countActiveEntities(
