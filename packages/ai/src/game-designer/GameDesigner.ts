@@ -1,5 +1,5 @@
 import {
-    gameSpecSchema,
+    getGameSpecSchema,
     validateGameSpec,
     type GameSpec
 } from "@game-factory/game-spec";
@@ -99,6 +99,7 @@ export interface GameDesignerPlatformConstraints {
 }
 
 export interface DesignGameInput {
+    genre?: GameSpec["game"]["genre"];
     userPrompt:
         string;
 
@@ -206,6 +207,17 @@ export class GameDesigner {
         input:
             DesignGameInput
     ): Promise<DesignGameResult> {
+        const genre = input.genre ?? "endless_runner";
+        const schema = getGameSpecSchema(genre);
+        const templates = input.templates.filter(template => template.genre === genre);
+        if (templates.length === 0) throw new Error(`Game designer has no template for genre: ${genre}`);
+        if (genre === "platformer" && input.platform.orientation === "portrait") {
+            throw new Error("Platformer currently supports landscape orientation only");
+        }
+        const selectedInput: DesignGameInput = {
+            ...input, genre, templates,
+            platform: { ...input.platform, ...(genre === "platformer" ? { orientation: "landscape" } : {}) }
+        };
         const userPrompt =
             input.userPrompt.trim();
 
@@ -248,7 +260,7 @@ export class GameDesigner {
 
                     content:
                         createDesignerInput(
-                            input
+                            selectedInput
                         )
                 }
             ];
@@ -316,11 +328,7 @@ export class GameDesigner {
                                 "game_spec",
 
                             schema:
-                                gameSpecSchema as
-                                    Record<
-                                        string,
-                                        unknown
-                                    >
+                                schema
                         }
                     });
 
@@ -333,7 +341,7 @@ export class GameDesigner {
                 );
 
             if (
-                validation.valid
+                validation.valid && validation.data.game.genre === genre
             ) {
                 return {
                     spec:
@@ -359,7 +367,9 @@ export class GameDesigner {
             }
 
             validationErrors =
-                validation.errors;
+                validation.valid
+                    ? [{ path: "/game/genre", message: `Must match the selected genre: ${genre}` }]
+                    : validation.errors;
         }
 
         throw new AIError(
@@ -385,6 +395,7 @@ function createDesignerInput(
 ): string {
     return JSON.stringify(
         {
+            selected_genre: input.genre ?? "endless_runner",
             user_prompt:
                 input.userPrompt,
 
@@ -402,7 +413,7 @@ function createDesignerInput(
                     "The response MUST conform exactly to this GameSpec JSON Schema. Do not rename, move, add, or remove fields.",
 
                 schema:
-                    gameSpecSchema
+                    getGameSpecSchema(input.genre ?? "endless_runner")
             }
         },
 

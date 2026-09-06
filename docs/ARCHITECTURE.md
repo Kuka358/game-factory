@@ -1,6 +1,6 @@
 # Architecture
 
-This describes the implementation through Stage 13.10 manual Platformer E2E.
+This describes the implementation through Stage 13.12 prompt-to-Platformer E2E.
 See DEVELOPMENT_STATUS.md, PLATFORMER_E2E.md and ROADMAP.md for verification scope.
 
 ## Packages and pipeline
@@ -16,7 +16,7 @@ See DEVELOPMENT_STATUS.md, PLATFORMER_E2E.md and ROADMAP.md for verification sco
 - `engine-core`: backend contracts. `engine-phaser`: Phaser scenes and Vite project generation/build.
 - `builder`: writes spec/manifests, resolves assets and invokes the selected backend.
 - `qa`: Playwright build server, debug driver and JSON reports. Its only gameplay
-  suites target endless runner and the manual Platformer fixture. QA selects the
+  suites target endless runner and Platformer (manual and Designer scenarios). QA selects the
   suite from the validated workspace GameSpec and stores artifacts with the report.
 - `platform-core`, `platform-web`, `platform-yandex`: platform contracts, browser
   mock, Yandex SDK integration and export tooling.
@@ -30,9 +30,18 @@ path is validated on load; object inputs are also validated. It resolves the
 template, asset requirements/manager and engine, runs the builder, then QA.
 Platform export is a separate operation.
 
-The AI path adds Designer/Reviewer processing before this pipeline. Its template
-catalog and Designer output schema remain runner-only. Platformer runtime support
-does not imply AI Platformer generation is enabled.
+The AI path adds Designer/Reviewer processing before this pipeline. `GameSpec`'s
+existing genre union remains authoritative; `getGameSpecSchema` selects its existing
+AJV schema and the shared `templateCatalog` supplies matching manifests/capabilities.
+Designer accepts an explicit `genre`, as do `generateSpecFromPrompt` and
+`runPromptGenerationPipeline`; omission retains `endless_runner`. CLI exposes
+`--genre platformer`. There is no natural-language classifier. API/web currently
+use the runner default. Manual files continue to declare their own genre.
+Designer validates every response and repairs invalid output or a mismatched genre
+with the existing retry loop. The orchestrator then enforces generation settings,
+asset capabilities and Reviewer approval before invoking the unchanged build pipeline.
+Platformer is landscape-only. Production LLM providers are reused; the new E2E
+uses a deterministic local fake LLM over the existing OpenAI-compatible transport.
 
 ## Platformer
 

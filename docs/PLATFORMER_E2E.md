@@ -80,8 +80,9 @@ The five Platformer browser checks cover:
 Tests observe the existing debug bridge and issue keyboard events; they never
 teleport the player, alter physics, grant score or force completion. Input release
 runs on browser animation frames to avoid Node/trace transport latency.
-The traversal controller is intentionally scoped to this manual fixture, not a
-general solver for arbitrary platformer settings. Broader QA is Stage 13.14.
+Stage 13.12 also reuses the traversal controller for an independent Designer scenario
+(see [PLATFORMER_DESIGNER_E2E.md](PLATFORMER_DESIGNER_E2E.md)). It is not a general
+solver for arbitrary platformer settings. Broader QA is Stage 13.14.
 
 Unit regressions cover required hazard density, object-input validation, eight
 asset requirements, built-in atlas metadata, production generated asset processing,

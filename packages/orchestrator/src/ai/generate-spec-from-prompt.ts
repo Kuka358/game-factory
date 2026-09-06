@@ -20,7 +20,8 @@ import {
 } from "@game-factory/game-spec";
 
 import {
-    endlessRunnerTemplate
+    templateCatalog,
+    type TemplateManifest
 } from "@game-factory/templates";
 
 import {
@@ -33,6 +34,7 @@ const MAX_DESIGN_REVIEW_ATTEMPTS =
 
 
 export interface GenerateSpecFromPromptInput {
+    genre?: GameSpec["game"]["genre"];
     prompt:
         string;
 
@@ -134,9 +136,10 @@ export async function generateSpecFromPrompt(
         new FilePromptRegistry();
 
     const templates =
-        createTemplateCatalog();
+        createTemplateCatalog(input.genre ?? "endless_runner");
 
     const platform = {
+        orientation: input.orientation,
         platform:
             "browser" as const,
 
@@ -199,6 +202,7 @@ export async function generateSpecFromPrompt(
     ) {
         const design =
             await designer.design({
+                genre: input.genre,
                 userPrompt:
                     designerPrompt,
 
@@ -647,63 +651,10 @@ function createRepairPrompt(
 }
 
 
-function createTemplateCatalog():
-    GameDesignerTemplate[]
-{
-    const manifest =
-        endlessRunnerTemplate
-            .manifest;
-
-    return [
-        {
-            id:
-                manifest.id,
-
-            version:
-                manifest.version,
-
-            genre:
-                manifest.genre,
-
-            supportedModes: [
-                ...manifest
-                    .supportedModes
-            ],
-
-            assetRoles: [
-                ...manifest
-                    .assetRoles
-            ],
-
-            additionalAssetCapabilities:
-                (
-                    manifest
-                        .additionalAssetCapabilities ??
-                    []
-                ).map(
-                    (capability) => ({
-                        role:
-                            capability.role,
-
-                        profile:
-                            capability.profile,
-
-                        description:
-                            capability.description,
-
-                        required:
-                            capability.required,
-
-                        uiKinds:
-                            capability.uiKinds
-                                ? [
-                                    ...capability.uiKinds
-                                ]
-                                : undefined
-                    })
-                )
-        }
-    ];
+function createTemplateCatalog(genre: GameSpec["game"]["genre"]): GameDesignerTemplate[] {
+    return templateCatalog
+        .filter(template => template.manifest.genre === genre)
+        .map(template => createDesignerTemplate(template.manifest));
 }
 
 
@@ -782,7 +733,7 @@ function createCapabilityFailureMessage(
 
 function createDesignerTemplate(
     manifest:
-        typeof endlessRunnerTemplate.manifest
+        TemplateManifest
 ): GameDesignerTemplate {
     return {
         id:

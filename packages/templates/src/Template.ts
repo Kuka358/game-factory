@@ -54,7 +54,7 @@ export interface TemplateManifest {
         string;
 
     genre:
-        string;
+        GameSpec["game"]["genre"];
 
     supportedModes:
         readonly string[];

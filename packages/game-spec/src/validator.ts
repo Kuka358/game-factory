@@ -6,12 +6,8 @@ import {
 } from "ajv";
 
 import {
-    gameSpecSchema
+    getGameSpecSchema
 } from "./schema.js";
-
-import {
-    platformerGameSpecSchema
-} from "./platformer-schema.js";
 
 import {
     isPlatformerGameSpec,
@@ -36,7 +32,7 @@ const validateEndlessRunner:
     ajv.compile<
         EndlessRunnerGameSpec
     >(
-        gameSpecSchema
+        getGameSpecSchema("endless_runner")
     );
 
 
@@ -47,7 +43,7 @@ const validatePlatformer:
     ajv.compile<
         PlatformerGameSpec
     >(
-        platformerGameSpecSchema
+        getGameSpecSchema("platformer")
     );
 
 

@@ -1,5 +1,16 @@
 import type { JSONSchemaType } from "ajv";
-import type { EndlessRunnerGameSpec } from "./types.js";
+import type { EndlessRunnerGameSpec, GameSpec } from "./types.js";
+import { platformerGameSpecSchema } from "./platformer-schema.js";
+
+// Reuse the genre discriminator and authoritative schemas for validation and AI.
+// gameSpecSchema remains the runner schema for backward-compatible consumers.
+export function getGameSpecSchema(genre: GameSpec["game"]["genre"]): Record<string, unknown> {
+    switch (genre) {
+        case "endless_runner": return gameSpecSchema;
+        case "platformer": return platformerGameSpecSchema;
+        default: throw new Error(`Unsupported game genre: ${String(genre)}`);
+    }
+}
 
 export const gameSpecSchema: JSONSchemaType<EndlessRunnerGameSpec> = {
     type: "object",

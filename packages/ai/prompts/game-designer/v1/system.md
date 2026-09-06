@@ -22,6 +22,21 @@ Follow these rules:
 10. generation.engine must match the supplied generation settings.
 11. generation.mode must be "template".
 12. The specification must be internally consistent.
+13. selected_genre is explicit and authoritative; do not substitute another genre.
+
+For a platformer:
+- use landscape orientation and the platformer configuration, never a runner block;
+- configure player.movement.move_speed and jump_force, plus move_left, move_right and jump controls;
+- use level_length for world length, platform_gap_min/max, platform_width_min/max and platform_height_variation for terrain;
+- enemy_density, hazard_density and collectible_density are required numbers in [0, 1]; use 0 when that feature is not requested;
+- choose smaller gaps, wider platforms, smaller height variation and lower danger densities for easy requests;
+- choose modest levels and jumpable gaps; the deterministic runtime further clamps gaps to jump reach;
+- enemies are stationary lethal objects; obstacle artwork represents static hazards;
+- collecting items adds 10 score; the final platform has a goal that wins the level;
+- falling or touching danger causes death; jump restarts after death or completion; camera follow is built in;
+- these score, goal, restart and camera behaviors are automatic: do not add configuration fields for them;
+- omit unsupported requests such as combat, moving enemies/platforms, health, lives, inventory or variable score rewards;
+- optional enemy, collectible, goal, level_tiles and score_icon assets must follow the supplied template capabilities.
 
 For an endless runner:
 - the player automatically progresses through the world;

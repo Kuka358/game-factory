@@ -59,6 +59,7 @@ disabled by default. Production verification/enabling remains deferred.
 13.7 collectibles
 13.8/13.9 hazards separation
 13.10 manual Platformer E2E integration
+13.12 explicit Platformer Designer and prompt E2E integration
 
 ### Current state
 
@@ -92,16 +93,30 @@ Platformer runtime supports:
 
 See [PLATFORMER_E2E.md](PLATFORMER_E2E.md) for commands and verification limits.
 
+### Stage 13.12 integration
+
+- Designer and prompt pipeline accept the existing GameSpec genre type; CLI accepts
+  `--genre platformer`. Omitted genre preserves runner behavior; inference is not added.
+- The existing schemas and template catalog provide the output contract and supported
+  assets. Schema errors and genre mismatches use Designer's existing repair loop.
+- Platformer instructions map requests to supported movement, terrain and densities;
+  score, camera, exit, death and restart remain built-in runtime behaviors.
+- `pnpm e2e:platformer:designer` starts from a readable crystal cave request, uses
+  a deterministic fake LLM and builtin assets, then runs the production pipeline
+  and all five existing Platformer browser tests. It does not load the manual fixture.
+- See [PLATFORMER_DESIGNER_E2E.md](PLATFORMER_DESIGNER_E2E.md) for verification.
+
 ## Next goal
 
-Stage 13.11: verify production FLUX.2 Klein artwork for all eight Platformer roles.
-AI Designer remains runner-only; Stage 13.12 has not been enabled.
+Stage 13.13: add Platformer-specific Reviewer checks. Do not start automatically.
+Stage 13.11 remains deferred because the real ComfyUI server is unavailable;
+production FLUX.2 Klein visual verification has not been performed.
 
 ## Known limits
 
 - Live ComfyUI is unavailable in the integration environment. Synthetic image
   provider regressions verify the generated-asset plumbing, not FLUX visual quality.
-- QA's traversal driver targets the manual fixture; it is not a universal solver
+- QA's traversal driver covers the manual and Designer scenarios; it is not a universal solver
   for every schema-valid seed, physics configuration or control combination.
   Broader playability coverage remains Stage 13.14.
 - Enemies intentionally suppress hazards on a shared platform, and collectibles

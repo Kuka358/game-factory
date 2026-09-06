@@ -1,6 +1,7 @@
 import {
     writeFile
 } from "node:fs/promises";
+import type { GameSpec } from "@game-factory/game-spec";
 
 import {
     join
@@ -40,6 +41,8 @@ export type PromptGenerationOrientation =
     | "landscape";
 
 export interface RunPromptGenerationPipelineOptions {
+    genre?: GameSpec["game"]["genre"];
+    seed?: number;
     orientation?:
         PromptGenerationOrientation;
 
@@ -85,6 +88,8 @@ export async function runPromptGenerationPipeline(
 
     const generated =
         await generateSpecFromPrompt({
+            genre: options.genre,
+            seed: options.seed,
             prompt,
             provider,
             model,
@@ -182,6 +187,8 @@ export async function runPromptGenerationPipeline(
                     prompt,
 
                 generationOptions: {
+                    genre: generated.spec.game.genre,
+                    seed: generated.spec.generation.seed,
                     orientation:
                         options.orientation ??
                         "auto",

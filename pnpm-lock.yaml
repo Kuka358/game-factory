@@ -45,6 +45,9 @@ importers:
       '@game-factory/orchestrator':
         specifier: workspace:*
         version: link:../../packages/orchestrator
+      '@game-factory/templates':
+        specifier: workspace:*
+        version: link:../../packages/templates
     devDependencies:
       '@types/node':
         specifier: ^26.2.0
@@ -52,6 +55,9 @@ importers:
       tsx:
         specifier: ^4
         version: 4.23.12
+      vitest:
+        specifier: ^3
+        version: 3.2.7(@types/node@26.2.0)(lightningcss@1.33.0)(tsx@4.23.12)
 
   apps/playground:
     dependencies:

@@ -11,15 +11,12 @@ import {
     runGenerationPipeline,
     runPromptGenerationPipeline
 } from "@game-factory/orchestrator";
+import { parseGenerationInput } from "./parse-generation-input.js";
 
 async function main():
     Promise<void>
 {
-    const rawInput =
-        process.argv
-            .slice(2)
-            .join(" ")
-            .trim();
+    const { input: rawInput, genre } = parseGenerationInput(process.argv.slice(2));
 
     if (!rawInput) {
         throw new Error(
@@ -31,6 +28,7 @@ async function main():
                 "  pnpm generate examples/runner-basic.json",
                 "",
                 "Generate from prompt:",
+                "  pnpm generate --genre platformer \"Create a small cave platformer\"",
                 "",
                 '  pnpm generate "Игра про рыцаря, который убегает от дракона"'
             ].join(
@@ -67,7 +65,8 @@ async function main():
             )
             : await runPromptGenerationPipeline(
                 rawInput,
-                outputRoot
+                outputRoot,
+                { genre }
             );
 
     console.log("");

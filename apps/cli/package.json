@@ -5,12 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/main.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@game-factory/templates": "workspace:*",
     "@game-factory/orchestrator": "workspace:*"
   },
   "devDependencies": {
+    "vitest": "^3",
     "@types/node": "^26.2.0",
     "tsx": "^4"
   }
