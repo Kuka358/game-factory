@@ -467,8 +467,9 @@ export function generatePlatformerLevel(
     /*
     * Each entity category gets its own deterministic stream.
     *
-    * Changing one density must not change platform geometry
-    * or shuffle the other categories.
+    * Densities never change platform geometry. Enemies take priority over
+    * hazards, and collectibles move away from danger, so those categories
+    * intentionally interact even though their random streams are separate.
     */
     const enemyRandom =
         createSeededRandom(
@@ -619,8 +620,10 @@ export function generatePlatformerLevel(
         }
 
 
+        const collectibleRoll = collectibleRandom();
+        let collectibleX = randomPlatformPosition(platform, collectibleRandom);
         if (
-            collectibleRandom() >=
+            collectibleRoll >=
             clamp(
                 settings.collectible_density,
                 0,
@@ -631,11 +634,6 @@ export function generatePlatformerLevel(
         }
 
 
-        let collectibleX =
-            randomPlatformPosition(
-                platform,
-                collectibleRandom
-            );
 
 
         if (

@@ -8,6 +8,8 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "qa": "pnpm --filter @game-factory/qa qa",
+    "e2e:platformer": "pnpm build && node scripts/platformer-e2e.mjs",
+    "e2e:platformer:mock-generated": "pnpm build && node packages/asset-generator/scripts/platformer-mock-e2e.mjs",
     "asset:benchmark": "pnpm --filter @game-factory/asset-generator benchmark:quality",
     "asset:benchmark:detail": "pnpm --filter @game-factory/asset-generator benchmark:detail",
     "asset:benchmark:background": "pnpm --filter @game-factory/asset-generator benchmark:background",

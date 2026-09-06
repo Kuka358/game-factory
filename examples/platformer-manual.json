@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "metadata": {
+    "title": "Crystal Caverns Manual",
+    "description": "A deterministic platformer integration level: collect crystals, jump over guards and spikes, and reach the cave exit."
+  },
+  "generation": { "mode": "template", "engine": "phaser", "seed": 12345 },
+  "game": { "genre": "platformer", "orientation": "landscape" },
+  "controls": {
+    "move_left": ["keyboard_a", "keyboard_left"],
+    "move_right": ["keyboard_d", "keyboard_right"],
+    "jump": ["keyboard_space", "keyboard_up", "pointer"]
+  },
+  "player": { "movement": { "move_speed": 280, "jump_force": 640 } },
+  "platformer": {
+    "level_length": 3200,
+    "platform_gap_min": 64,
+    "platform_gap_max": 96,
+    "platform_width_min": 320,
+    "platform_width_max": 384,
+    "platform_height_variation": 40,
+    "enemy_density": 0.45,
+    "hazard_density": 0.8,
+    "collectible_density": 1
+  },
+  "assets": {
+    "style": "pixel-art",
+    "global_tags": ["crystal cave"],
+    "roles": {
+      "player": { "tags": ["cave explorer"] },
+      "obstacle": { "tags": ["crystal spikes"] },
+      "background": { "tags": ["underground cavern", "distant crystals"] }
+    },
+    "additional": [
+      { "role": "enemy", "profile": "npc", "tags": ["crystal guardian"] },
+      { "role": "collectible", "profile": "item", "tags": ["gold crystal"] },
+      { "role": "goal", "profile": "item", "tags": ["cave exit portal"] },
+      { "role": "level_tiles", "profile": "tileset", "tags": ["cave stone terrain"] },
+      { "role": "score_icon", "profile": "ui", "ui_kind": "icon", "tags": ["crystal icon"] }
+    ]
+  }
+}

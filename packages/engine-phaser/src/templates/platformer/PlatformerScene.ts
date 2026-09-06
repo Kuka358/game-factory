@@ -1,3 +1,4 @@
+import { PLATFORMER_BODIES, setPlatformerBody } from "./platformer-bodies.js";
 import Phaser from "phaser";
 
 import type {
@@ -6,6 +7,7 @@ import type {
 
 import type {
     GameContext,
+    DebugRectangle,
     ScoreChangedEvent
 } from "@game-factory/runtime";
 
@@ -93,6 +95,8 @@ export class PlatformerScene
     private scoreIcon?:
         Phaser.GameObjects.Image;
 
+    private tileVisuals = 0;
+
 
     constructor(
         private readonly spec:
@@ -121,6 +125,7 @@ export class PlatformerScene
 
 
     create(): void {
+        this.tileVisuals = 0;
         const {
             width,
             height
@@ -200,18 +205,7 @@ export class PlatformerScene
             this.add.group();
 
 
-        if (
-            this.assets.has(
-                COLLECTIBLE_ROLE
-            )
-        ) {
-            this.collectibles =
-                this.add.group();
-        } else {
-            this.collectibles =
-                undefined;
-        }
-
+        this.collectibles = this.add.group();
 
         this.createLevelEntities(
             this.levelLayout
@@ -473,15 +467,7 @@ export class PlatformerScene
         );
 
 
-        body.setSize(
-            enemy.displayWidth *
-                0.7,
-
-            enemy.displayHeight *
-                0.86,
-
-            true
-        );
+        setPlatformerBody(enemy, PLATFORMER_BODIES.enemy);
 
 
         this.enemies.add(
@@ -528,15 +514,7 @@ export class PlatformerScene
         );
 
 
-        body.setSize(
-            hazard.displayWidth *
-                0.8,
-
-            hazard.displayHeight *
-                0.72,
-
-            true
-        );
+        setPlatformerBody(hazard, PLATFORMER_BODIES.hazard);
 
 
         this.hazards.add(
@@ -561,10 +539,7 @@ export class PlatformerScene
                 definition.x,
                 definition.y,
 
-                this.assets
-                    .getTextureKey(
-                        COLLECTIBLE_ROLE
-                    )
+                this.assets.has(COLLECTIBLE_ROLE) ? this.assets.getTextureKey(COLLECTIBLE_ROLE) : "__WHITE"
             );
 
 
@@ -574,6 +549,10 @@ export class PlatformerScene
             40
         );
 
+
+        if (!this.assets.has(COLLECTIBLE_ROLE)) {
+            collectible.setDisplaySize(30, 30).setTint(0xffcc33);
+        }
 
         collectible
             .setImmovable(
@@ -591,15 +570,7 @@ export class PlatformerScene
         );
 
 
-        body.setSize(
-            collectible.displayWidth *
-                0.75,
-
-            collectible.displayHeight *
-                0.75,
-
-            true
-        );
+        setPlatformerBody(collectible, PLATFORMER_BODIES.collectible);
 
 
         this.collectibles.add(
@@ -1088,6 +1059,8 @@ export class PlatformerScene
                     frame
                 );
 
+            this.tileVisuals += 1;
+
 
             tile
                 .setOrigin(
@@ -1128,22 +1101,7 @@ export class PlatformerScene
         );
 
 
-        const body =
-            this.player.body as
-                Phaser.Physics.Arcade.Body;
-
-
-        body.setSize(
-            this.player
-                .displayWidth *
-                0.72,
-
-            this.player
-                .displayHeight *
-                0.88,
-
-            true
-        );
+        setPlatformerBody(this.player, PLATFORMER_BODIES.player);
 
 
         this.player
@@ -1190,6 +1148,7 @@ export class PlatformerScene
 
 
             this.goal.refreshBody();
+            this.goal.body.setSize(PLATFORMER_BODIES.goal.width, PLATFORMER_BODIES.goal.height, true);
 
             return;
         }
@@ -1220,7 +1179,7 @@ export class PlatformerScene
         void
     {
         if (
-            this.finished
+            this.finished || this.dead
         ) {
             return;
         }
@@ -1312,7 +1271,7 @@ export class PlatformerScene
     ): void
     {
         if (
-            this.dead
+            this.dead || this.finished
         ) {
             return;
         }
@@ -1454,7 +1413,21 @@ export class PlatformerScene
 
                     game_over:
                         this.dead ||
-                        this.finished
+                        this.finished,
+
+                    details: {
+                        genre: "platformer",
+                        grounded: Boolean(this.player.body?.blocked.down || this.player.body?.touching.down),
+                        completed: this.finished,
+                        cameraX: this.cameras.main.scrollX,
+                        playerBody: this.bodyRectangle(this.player),
+                        platforms: this.levelLayout.platforms.map(platform => ({ ...platform })),
+                        goal: this.bodyRectangle(this.goal),
+                        enemies: this.groupRectangles(this.enemies),
+                        hazards: this.groupRectangles(this.hazards),
+                        collectibles: this.groupRectangles(this.collectibles),
+                        tileVisuals: this.tileVisuals
+                    }
                 })
             );
     }
@@ -1478,6 +1451,18 @@ export class PlatformerScene
                     child.active
             )
             .length;
+    }
+
+    private bodyRectangle(image: Phaser.Physics.Arcade.Image): DebugRectangle {
+        const body = image.body;
+        if (!body) throw new Error("Platformer entity has no physics body");
+        return { x: body.center.x, y: body.center.y, width: body.width, height: body.height };
+    }
+
+    private groupRectangles(group: Phaser.GameObjects.Group | undefined): DebugRectangle[] {
+        return (group?.getChildren() ?? [])
+            .filter((child): child is Phaser.Physics.Arcade.Image => child instanceof Phaser.Physics.Arcade.Image && child.active)
+            .map(child => this.bodyRectangle(child));
     }
 
 

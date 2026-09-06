@@ -31,8 +31,9 @@ import {
     resolveAssetManager
 } from "./assets/resolve-asset-manager.js";
 
-import type {
-    GameSpec
+import {
+    validateGameSpec,
+    type GameSpec
 } from "@game-factory/game-spec";
 
 import type {
@@ -48,7 +49,6 @@ export interface GenerationPipelineResult {
 }
 
 import {
-    BuiltinAssetManager,
     createAssetRequirements
 } from "@game-factory/assets";
 
@@ -80,13 +80,19 @@ export async function runGenerationPipeline(
         "[1/6] Loading GameSpec..."
     );
 
-    const spec =
+    const loadedSpec =
         typeof input ===
             "string"
             ? await loadGameSpec(
                 input
             )
             : input;
+
+    const validation = validateGameSpec(loadedSpec);
+    if (!validation.valid) {
+        throw new Error(`GameSpec validation failed: ${validation.errors.map(error => `${error.path}: ${error.message}`).join("; ")}`);
+    }
+    const spec = validation.data;
 
     console.log(
         "[2/6] Selecting template..."

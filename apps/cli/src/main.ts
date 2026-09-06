@@ -91,8 +91,9 @@ async function main():
     console.log("");
 
     console.log(
-        "RESULT: PASS"
+        result.success ? "RESULT: PASS" : "RESULT: FAIL"
     );
+    if (!result.success) process.exitCode = 1;
 }
 
 function resolveRepoRoot():

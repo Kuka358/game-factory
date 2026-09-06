@@ -3,6 +3,8 @@ import {
 } from "@playwright/test";
 
 import path from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { validateGameSpec } from "@game-factory/game-spec";
 
 import {
     fileURLToPath
@@ -32,14 +34,11 @@ if (!qaReportPath) {
     );
 }
 
-if (!buildDir) {
-    throw new Error(
-        "GAME_FACTORY_BUILD_DIR is not set"
-    );
-}
-
 export default defineConfig({
     testDir: "./tests",
+    testMatch: selectGameplayTest(),
+    outputDir: path.join(path.dirname(qaReportPath), "test-results"),
+    workers: 1,
 
     timeout: 20_000,
 
@@ -91,3 +90,12 @@ export default defineConfig({
         ]
     ],
 });
+
+function selectGameplayTest(): string {
+    const specPath = path.resolve(buildDir!, "../game-spec.json");
+    // Legacy standalone runner/playground builds do not have a workspace spec.
+    if (!existsSync(specPath)) return "runner.smoke.spec.ts";
+    const result = validateGameSpec(JSON.parse(readFileSync(specPath, "utf8")));
+    if (!result.valid) throw new Error(`QA GameSpec is invalid: ${JSON.stringify(result.errors)}`);
+    return result.data.game.genre === "platformer" ? "platformer.smoke.spec.ts" : "runner.smoke.spec.ts";
+}

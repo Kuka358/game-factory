@@ -23,6 +23,7 @@
     "tsx": "^4.23.12"
   },
   "dependencies": {
+    "@game-factory/game-spec": "workspace:*",
     "@game-factory/engine-phaser": "workspace:*",
     "@game-factory/runtime": "workspace:*"
   }

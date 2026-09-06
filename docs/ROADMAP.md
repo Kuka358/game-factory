@@ -2,19 +2,13 @@
 
 ## Stage 13
 
-### 13.10 Platformer manual E2E
-Create a real PlatformerGameSpec and run the complete pipeline:
+### 13.10 Platformer manual E2E — implemented
 
-GameSpec
-→ validation
-→ template resolution
-→ asset requirements
-→ generated assets
-→ builder
-→ Phaser runtime
-→ QA
+Manual GameSpec validation → template resolution → asset requirements → asset
+resolution/generation → builder → Phaser runtime → genre-specific QA.
 
-Fix all integration problems found.
+Reproducible commands and test scope are in [PLATFORMER_E2E.md](PLATFORMER_E2E.md).
+Production model visual verification remains Stage 13.11. AI Designer is unchanged.
 
 ### 13.11 Platformer generated level assets
 Verify:
@@ -42,7 +36,8 @@ Only after manual E2E passes:
 Add platformer-specific review checks.
 
 ### 13.14 Builder / QA
-Add automated platformer QA assertions.
+Expand the Stage 13.10 smoke assertions across seeds, movement settings and
+control combinations; the current traversal driver targets the manual fixture.
 
 ### 13.15 Full AI-generated Platformer E2E
 Prompt

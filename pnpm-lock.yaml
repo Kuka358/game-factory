@@ -332,6 +332,9 @@ importers:
       '@game-factory/engine-phaser':
         specifier: workspace:*
         version: link:../engine-phaser
+      '@game-factory/game-spec':
+        specifier: workspace:*
+        version: link:../game-spec
       '@game-factory/runtime':
         specifier: workspace:*
         version: link:../runtime

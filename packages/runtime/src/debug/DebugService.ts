@@ -15,6 +15,29 @@ export interface GameDebugState {
     entities: Record<string, number>;
 
     game_over: boolean;
+
+    details?: PlatformerDebugDetails;
+}
+
+export interface DebugRectangle {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+export interface PlatformerDebugDetails {
+    genre: "platformer";
+    grounded: boolean;
+    completed: boolean;
+    cameraX: number;
+    playerBody: DebugRectangle;
+    platforms: DebugRectangle[];
+    goal: DebugRectangle;
+    enemies: DebugRectangle[];
+    hazards: DebugRectangle[];
+    collectibles: DebugRectangle[];
+    tileVisuals: number;
 }
 
 export interface DebugError {

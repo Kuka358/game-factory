@@ -289,6 +289,7 @@ export const platformerGameSpecSchema:
                 "platform_width_max",
                 "platform_height_variation",
                 "enemy_density",
+                "hazard_density",
                 "collectible_density"
             ],
 

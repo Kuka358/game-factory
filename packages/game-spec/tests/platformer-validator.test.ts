@@ -89,6 +89,8 @@ function createPlatformerSpec() {
             enemy_density:
                 0.15,
 
+            hazard_density: 0.2,
+
             collectible_density:
                 0.25
         },
@@ -128,6 +130,14 @@ function createPlatformerSpec() {
 describe(
     "platformer GameSpec",
     () => {
+        it("rejects missing hazard density instead of returning an unsound PlatformerSpec", () => {
+            const { hazard_density: _density, ...platformer } = createPlatformerSpec().platformer;
+            const result = validateGameSpec({ ...createPlatformerSpec(), platformer });
+            expect(result.valid).toBe(false);
+            if (!result.valid) expect(result.errors).toContainEqual({
+                path: "/platformer/hazard_density", message: "Required property is missing"
+            });
+        });
         it(
             "accepts a valid platformer spec",
             () => {

@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { AssetManifestEntry, AssetSpriteSheet } from "./AssetManifest.js";
 
 import type {
     AssetManager,
@@ -20,7 +21,7 @@ export class BuiltinAssetManager
             }
         );
 
-        const assets = [];
+        const assets: AssetManifestEntry[] = [];
 
         for (
             const requirement of
@@ -31,12 +32,20 @@ export class BuiltinAssetManager
                     requirement.role
                 )}.svg`;
 
+            const tileset = requirement.requirements.generation?.tileset;
+            const spritesheet: AssetSpriteSheet | undefined = tileset ? {
+                frameWidth: tileset.tileWidth,
+                frameHeight: tileset.tileHeight,
+                columns: tileset.columns,
+                rows: tileset.rows
+            } : undefined;
+
             await fs.writeFile(
                 path.join(
                     input.assetsDir,
                     fileName
                 ),
-                createPlaceholderSvg(
+                spritesheet ? createTerrainAtlasSvg(spritesheet) : createPlaceholderSvg(
                     requirement.role
                 ),
                 "utf8"
@@ -54,6 +63,7 @@ export class BuiltinAssetManager
 
                 source:
                     "builtin" as const,
+                ...(spritesheet ? { spritesheet } : {}),
 
                 license: {
                     type:
@@ -144,4 +154,17 @@ function createPlaceholderSvg(
 </svg>
 `.trim();
     }
+}
+
+function createTerrainAtlasSvg(sheet: AssetSpriteSheet): string {
+    const { frameWidth, frameHeight, columns, rows } = sheet;
+    if (![frameWidth, frameHeight, columns, rows].every(value => Number.isInteger(value) && value > 0)) {
+        throw new Error("Built-in tileset dimensions must be positive integers");
+    }
+    const tiles = Array.from({ length: columns * rows }, (_, index) => {
+        const x = (index % columns) * frameWidth;
+        const y = Math.floor(index / columns) * frameHeight;
+        return `<rect x="${x}" y="${y}" width="${frameWidth}" height="${frameHeight}" fill="#526478"/><rect x="${x}" y="${y}" width="${frameWidth}" height="8" fill="#86a4b8"/>`;
+    }).join("");
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${frameWidth * columns}" height="${frameHeight * rows}">${tiles}</svg>`;
 }
