@@ -158,12 +158,13 @@ export class AutonomyEngine {
             readonly string[] |
             undefined;
 
-        for (
-            let attempt = 1;
-            attempt <=
-                contract.maxLocalAttempts;
-            attempt += 1
-        ) {
+        let escalationRepairRounds =
+            0;
+
+        let attempt =
+            1;
+
+        while (true) {
             run.status =
                 attempt === 1
                     ? "implementing"
@@ -248,6 +249,8 @@ export class AutonomyEngine {
                     attempt <
                     contract.maxLocalAttempts
                 ) {
+                    attempt +=
+                        1;
                     continue;
                 }
 
@@ -273,6 +276,43 @@ export class AutonomyEngine {
 
                             workerResult
                         });
+
+                if (
+                    escalation.type ===
+                    "repair"
+                ) {
+                    if (
+                        escalationRepairRounds >=
+                        contract.escalation
+                            .maxRepairRounds
+                    ) {
+                        run.status =
+                            "blocked";
+
+                        run.failureReason =
+                            "Escalation repair budget exhausted";
+
+                        touchRun(
+                            run
+                        );
+
+                        return false;
+                    }
+
+                    escalationRepairRounds +=
+                        1;
+
+                    repairInstructions =
+                        escalation.instructions;
+
+                    previousVerification =
+                        verification;
+
+                    attempt +=
+                        1;
+
+                    continue;
+                }
 
                 if (
                     escalation.type ===
@@ -314,12 +354,6 @@ export class AutonomyEngine {
                 ) {
                     return true;
                 }
-
-                run.status =
-                    "blocked";
-
-                run.failureReason =
-                    "Repair requested after local retry budget was exhausted";
 
                 touchRun(
                     run

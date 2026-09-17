@@ -67,7 +67,10 @@ const contract = {
             true,
 
         onArchitectureConflict:
-            true
+            true,
+
+        maxRepairRounds:
+            1
     }
 } as const;
 
@@ -355,6 +358,156 @@ describe(
                         ?.passed
                 ).toBe(
                     true
+                );
+            }
+        );
+
+        it(
+            "performs a bounded repair after escalation",
+            async () => {
+                let planningCalls =
+                    0;
+
+                let workerCalls =
+                    0;
+
+                let advisorCalls =
+                    0;
+
+                const planner:
+                    Planner = {
+                        async plan() {
+                            planningCalls +=
+                                1;
+
+                            return planningCalls ===
+                                1
+                                ? {
+                                    type:
+                                        "iteration",
+
+                                    contract
+                                }
+                                : {
+                                    type:
+                                        "complete",
+
+                                    reason:
+                                        "Escalation repair succeeded"
+                                };
+                        }
+                    };
+
+                const worker:
+                    CodingWorker = {
+                        async execute(
+                            input
+                        ) {
+                            workerCalls +=
+                                1;
+
+                            if (
+                                input.attempt ===
+                                3
+                            ) {
+                                expect(
+                                    input.repairInstructions
+                                ).toEqual([
+                                    "Apply cloud repair"
+                                ]);
+                            }
+
+                            return {
+                                summary:
+                                    "Attempt",
+
+                                changedFiles:
+                                    []
+                            };
+                        }
+                    };
+
+                const verifier:
+                    Verifier = {
+                        async verify(
+                            input
+                        ) {
+                            return {
+                                passed:
+                                    input.attempt ===
+                                    3,
+
+                                checks:
+                                    []
+                            };
+                        }
+                    };
+
+                const failureAdvisor:
+                    FailureAdvisor = {
+                        async advise() {
+                            advisorCalls +=
+                                1;
+
+                            return {
+                                type:
+                                    "repair",
+
+                                instructions: [
+                                    "Apply cloud repair"
+                                ]
+                            };
+                        }
+                    };
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        failureAdvisor
+                    });
+
+                const run =
+                    createAutonomousRun({
+                        id:
+                            "run-003",
+
+                        goal:
+                            "Repair after escalation",
+
+                        maxIterations:
+                            3
+                    });
+
+                const result =
+                    await engine.run(
+                        run
+                    );
+
+                expect(
+                    result.status
+                ).toBe(
+                    "completed"
+                );
+
+                expect(
+                    workerCalls
+                ).toBe(
+                    3
+                );
+
+                expect(
+                    advisorCalls
+                ).toBe(
+                    1
+                );
+
+                expect(
+                    result.iterations[0]
+                        ?.attempts
+                ).toHaveLength(
+                    3
                 );
             }
         );

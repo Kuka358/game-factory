@@ -42,6 +42,9 @@ export interface EscalationPolicy {
 
     onArchitectureConflict:
         boolean;
+
+    maxRepairRounds:
+        number;
 }
 
 export interface IterationContract {
