@@ -1,5 +1,6 @@
 import { PLATFORMER_BODIES, setPlatformerBody } from "./platformer-bodies.js";
 import Phaser from "phaser";
+import { PlatformerPhysicsDiagnostics } from "../../debug/PlatformerPhysicsDiagnostics.js";
 
 import type {
     PlatformerGameSpec
@@ -295,12 +296,18 @@ export class PlatformerScene
         const unregisterDebug =
             this.registerDebugState();
 
+        const diagnostics = new URLSearchParams(window.location.search).get("platformerDiagnostics") === "1"
+            ? new PlatformerPhysicsDiagnostics(this, this.player, this.ctx, this.spec, () => this.update(), () => this.inputAdapter.dispatchAction("jump")) : undefined;
+        this.ctx.debug.platformerDiagnostics = diagnostics;
+
 
         this.events.once(
             Phaser.Scenes.Events
                 .SHUTDOWN,
             () => {
                 unregisterDebug();
+                diagnostics?.stopCapture();
+                if (this.ctx.debug.platformerDiagnostics === diagnostics) this.ctx.debug.platformerDiagnostics = undefined;
 
                 unsubscribeScore();
 
@@ -1421,6 +1428,7 @@ export class PlatformerScene
                         completed: this.finished,
                         cameraX: this.cameras.main.scrollX,
                         playerBody: this.bodyRectangle(this.player),
+                        playerVelocity: { x: this.player.body?.velocity.x ?? 0, y: this.player.body?.velocity.y ?? 0 },
                         platforms: this.levelLayout.platforms.map(platform => ({ ...platform })),
                         goal: this.bodyRectangle(this.goal),
                         enemies: this.groupRectangles(this.enemies),

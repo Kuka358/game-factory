@@ -1,135 +1,16 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { isPlatformerGameSpec, validateGameSpec } from "@game-factory/game-spec";
-import type { DebugRectangle, PlatformerDebugDetails } from "@game-factory/runtime";
+import { createPlatformerDriver } from "../src/PlatformerDriver.js";
 import { GameFactoryDriver } from "../src/GameFactoryDriver.js";
 
 const validation = validateGameSpec(JSON.parse(readFileSync(path.resolve(process.env.GAME_FACTORY_BUILD_DIR!, "../game-spec.json"), "utf8")));
 if (!validation.valid || !isPlatformerGameSpec(validation.data)) throw new Error("Platformer QA requires a validated Platformer build spec");
 const spec = validation.data;
-const keys = {
-    left: spec.controls.move_left.includes("keyboard_left") ? "ArrowLeft" : "a",
-    right: spec.controls.move_right.includes("keyboard_right") ? "ArrowRight" : "d"
-};
+const { details, settle, moveTo, jumpTo, traverse, observations } = createPlatformerDriver(spec);
 
 test.setTimeout(120_000);
-
-async function details(page: Page): Promise<PlatformerDebugDetails> {
-    const state = await new GameFactoryDriver(page).getState();
-    if (!state.details || state.details.genre !== "platformer") throw new Error("Missing Platformer debug details");
-    return state.details;
-}
-
-async function settle(page: Page): Promise<void> {
-    await page.waitForFunction(() => {
-        const state = window.__GAME_FACTORY__?.getState();
-        return state?.details?.grounded || state?.game_over;
-    });
-    expect((await new GameFactoryDriver(page).getState()).player?.alive).toBe(true);
-}
-
-// Run key release on a browser animation frame. Node/trace round trips can take
-// 100ms+, enough to walk into a hazard after reaching a waypoint.
-async function act(page: Page, target: number, jump: boolean): Promise<void> {
-    await page.evaluate(async ({ targetX, jumping, leftCode, rightCode, jumpCode }) => {
-        const bridge = window.__GAME_FACTORY__;
-        if (!bridge) throw new Error("Missing debug bridge");
-        const state = () => bridge.getState();
-        const key = (type: string, keyCode: number) => window.dispatchEvent(new KeyboardEvent(type, { keyCode, which: keyCode, bubbles: true }));
-        const startX = state().player!.x;
-        const right = targetX > startX;
-        const direction = right ? rightCode : leftCode;
-        let moving = Math.abs(targetX - startX) >= 4;
-        if (jumping) {
-            if (jumpCode) key("keydown", jumpCode);
-            else bridge.dispatchAction("jump");
-        }
-        if (moving) key("keydown", direction);
-        let airborne = false;
-        const deadline = performance.now() + 10_000;
-        try {
-            await new Promise<void>((resolve, reject) => {
-                const step = () => {
-                    const current = state();
-                    if (jumping && !current.details?.grounded) airborne = true;
-                    if (moving && (right ? current.player!.x >= targetX : current.player!.x <= targetX)) {
-                        key("keyup", direction);
-                        moving = false;
-                    }
-                    if (current.game_over || (!moving && (!jumping || (airborne && current.details?.grounded)))) return resolve();
-                    if (performance.now() > deadline) return reject(new Error("Platformer input waypoint timed out"));
-                    requestAnimationFrame(step);
-                };
-                requestAnimationFrame(step);
-            });
-        } finally {
-            key("keyup", direction);
-            if (jumpCode) key("keyup", jumpCode);
-        }
-    }, {
-        targetX: target, jumping: jump,
-        leftCode: keys.left === "ArrowLeft" ? 37 : 65,
-        rightCode: keys.right === "ArrowRight" ? 39 : 68,
-        jumpCode: spec.controls.jump.includes("keyboard_space") ? 32 : spec.controls.jump.includes("keyboard_up") ? 38 : 0
-    });
-}
-
-async function moveTo(page: Page, target: number): Promise<void> {
-    await act(page, target, false);
-}
-
-async function jumpTo(page: Page, target: number): Promise<void> {
-    await settle(page);
-    await act(page, target, true);
-    await settle(page);
-}
-
-async function advance(page: Page, platform: DebugRectangle, target: number): Promise<void> {
-    const state = await details(page);
-    const top = platform.y - platform.height / 2;
-    const dangers = [...state.enemies, ...state.hazards]
-        .filter(danger => Math.abs(danger.y - top) < 64 && danger.x > state.playerBody.x && danger.x < target + 42)
-        .sort((a, b) => a.x - b.x);
-    for (const danger of dangers) {
-        await moveTo(page, Math.max(state.playerBody.x, danger.x - 112));
-        await jumpTo(page, Math.min(platform.x + platform.width / 2 - 25, danger.x + 76));
-    }
-    await moveTo(page, target);
-    expect((await new GameFactoryDriver(page).getState()).player?.alive).toBe(true);
-}
-
-async function traverse(page: Page, dieAt?: "enemies" | "hazards"): Promise<void> {
-    const layout = await details(page);
-    for (let index = 0; index < layout.platforms.length; index += 1) {
-        const platform = layout.platforms[index]!;
-        const left = platform.x - platform.width / 2;
-        const right = platform.x + platform.width / 2;
-        const state = await details(page);
-        const targetDanger = dieAt && state[dieAt].find(danger => danger.x > left && danger.x < right);
-        if (targetDanger) {
-            await moveTo(page, targetDanger.x);
-            await expect.poll(async () => (await new GameFactoryDriver(page).getState()).game_over).toBe(true);
-            expect((await new GameFactoryDriver(page).getState()).player?.alive).toBe(false);
-            expect((await details(page)).completed).toBe(false);
-            return;
-        }
-        for (const coin of state.collectibles.filter(coin => coin.x > left && coin.x < right)) {
-            await advance(page, platform, coin.x);
-            const before = (await new GameFactoryDriver(page).getState()).score;
-            await jumpTo(page, coin.x);
-            expect((await new GameFactoryDriver(page).getState()).score).toBeGreaterThanOrEqual(before);
-        }
-        const next = layout.platforms[index + 1];
-        if (!next) {
-            await advance(page, platform, layout.goal.x);
-            break;
-        }
-        await advance(page, platform, right - 25);
-        await jumpTo(page, next.x - next.width / 2 + 25);
-    }
-    if (dieAt) throw new Error(`Did not encounter ${dieAt}`);
-}
 
 test.beforeEach(async ({ page }) => {
     await page.goto("/");
@@ -180,7 +61,10 @@ test("platformer playable route, collectibles, camera, goal and restart", async 
     for (const hazard of initial.hazards) expect([hazard.width, hazard.height]).toEqual([38, 28]);
     for (const coin of initial.collectibles) expect([coin.width, coin.height]).toEqual([30, 30]);
     expect([initial.goal.width, initial.goal.height]).toEqual([40, 96]);
+    const firstRouteAction = observations.length;
     await traverse(page);
+    // Optional coins behind a safe landing must not pull QA back into danger.
+    expect(observations.slice(firstRouteAction).filter(action => action.jump && action.direction === "left")).toEqual([]);
     await expect.poll(async () => (await details(page)).completed).toBe(true);
     expect((await game.getState()).player?.alive).toBe(true);
     expect((await game.getState()).game_over).toBe(true);

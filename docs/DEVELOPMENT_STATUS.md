@@ -60,6 +60,10 @@ disabled by default. Production verification/enabling remains deferred.
 13.8/13.9 hazards separation
 13.10 manual Platformer E2E integration
 13.12 explicit Platformer Designer and prompt E2E integration
+13.13 deterministic Platformer semantic Reviewer and existing repair integration
+13.14 Platformer robustness benchmark and measured smoke/full baseline
+13.15 Platformer traversal diagnostics, targeted QA fixes and measured comparison
+13.16 bounded Platformer lookahead, ceiling diagnostics and regression comparison
 
 ### Current state
 
@@ -106,9 +110,53 @@ See [PLATFORMER_E2E.md](PLATFORMER_E2E.md) for commands and verification limits.
   and all five existing Platformer browser tests. It does not load the manual fixture.
 - See [PLATFORMER_DESIGNER_E2E.md](PLATFORMER_DESIGNER_E2E.md) for verification.
 
+### Stage 13.13 integration
+
+- Existing Reviewer performs deterministic Platformer control and guaranteed
+  flat-ground barrier checks before the LLM; existing repair limits are preserved.
+- Optional collectible reach and enemy/hazard priority produce warnings.
+- Shared physics constants retain the existing numeric values and deterministic
+  generator/runtime behavior. No asset-generation changes were made.
+- See [PLATFORMER_REVIEWER.md](PLATFORMER_REVIEWER.md) for invariants and verification.
+- Final resumed regression: build/typecheck PASS, 117 unit/regression tests and
+  21 browser tests PASS (Designer, manual, fallback, mock generated-only, Runner).
+
 ## Next goal
 
-Stage 13.13: add Platformer-specific Reviewer checks. Do not start automatically.
+Stage 13.14 is complete: smoke 4/6 (66.7%), full 17/30 (56.7%) observed QA
+completions. All cases passed validation/review/generation/build/boot; the 13 full
+failures are conservative navigation classifications, not proofs of unreachable
+levels. Two representative failures were reproduced individually. Build/typecheck,
+120 unit/regression tests and 21 guaranteed browser tests pass.
+See [PLATFORMER_BENCHMARK.md](PLATFORMER_BENCHMARK.md).
+Stage 13.15 is complete: unchanged full matrix improved 17/30 → 21/30 (70%);
+smoke improved 4/6 → 5/6 (83.3%), with no previously passing full case regressed.
+Build/typecheck, 126 unit/regression and 21 browser tests pass. Three representative
+remaining failures were reproduced individually. Nine full failures remain
+conservative navigation classifications with scoped geometry/physics evidence.
+Generator, Reviewer rules and game physics were not changed by Stage 13.15.
+See [PLATFORMER_RELIABILITY.md](PLATFORMER_RELIABILITY.md).
+Stage 13.16: unchanged full matrix improved 21/30 → 24/30 (80%); smoke remains
+5/6 (83.3%). All previously successful cases are preserved. Build/typecheck,
+135 unit/regression tests and 22 guaranteed browser checks pass (the previous 21
+plus narrow-fast/1). Narrow-fast/1, /42 and /12345 are newly resolved. Six
+navigation failures remain, with no runtime errors or whole-level impossibility
+claims. Generator, Reviewer, physics, assets, matrix and timeouts are unchanged.
+See [PLATFORMER_LOOKAHEAD.md](PLATFORMER_LOOKAHEAD.md) for reports and replay evidence.
+Stage 13.17 is complete: bounded real-Arcade capture and empirical
+trials distinguish local QA failures from sufficient no-route cut certificates.
+Four original low-jump levels had a proven lethal-span obstruction; a targeted
+physics-derived exposed-hazard-height correction now passes all four real
+crossing regressions. Narrow/high alternatives remain scoped local evidence,
+not global playability proofs. See [PLATFORMER_PHYSICS_PROOF.md](PLATFORMER_PHYSICS_PROOF.md)
+for the pre-change diagnosis, correction, commands and final validation.
+The resumed unchanged matrix is 24/30 full and 5/6 smoke; all 24 Stage 13.16
+successes are preserved. Build/typecheck, 155 unit tests, 22 configured browser
+checks and bounded physical diagnostics pass. Representative remaining failures
+reproduce without runtime errors. Decision gate A recommends one final narrow
+QA stage for takeoff alignment and demonstrated bypasses; Stage 13.18 has not
+started. No corrected whole level is certified unreachable; high-jump 6→7
+remains uncertain.
 Stage 13.11 remains deferred because the real ComfyUI server is unavailable;
 production FLUX.2 Klein visual verification has not been performed.
 
@@ -118,7 +166,7 @@ production FLUX.2 Klein visual verification has not been performed.
   provider regressions verify the generated-asset plumbing, not FLUX visual quality.
 - QA's traversal driver covers the manual and Designer scenarios; it is not a universal solver
   for every schema-valid seed, physics configuration or control combination.
-  Broader playability coverage remains Stage 13.14.
+  Stage 13.14 measures a broader matrix but does not certify arbitrary-seed playability.
 - Enemies intentionally suppress hazards on a shared platform, and collectibles
   move away from danger. These are deterministic category interactions.
 - Bare `pnpm test` needs `GAME_FACTORY_BUILD_DIR` and `GAME_FACTORY_QA_REPORT`.

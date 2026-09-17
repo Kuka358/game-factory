@@ -1,6 +1,8 @@
 import type {
     PlatformerGameSpec
 } from "@game-factory/game-spec";
+import { PLATFORMER_ENTITY_HEIGHTS, PLATFORMER_FINISH_MARGIN, PLATFORMER_WORLD_EDGE_MARGIN } from "@game-factory/runtime";
+import { hazardHeightAboveSurface } from "./hazard-clearance.js";
 
 import {
     ARCADE_GRAVITY_Y
@@ -198,7 +200,7 @@ export function generatePlatformerLevel(
                 300,
 
             settings.level_length -
-                220
+                PLATFORMER_FINISH_MARGIN
         );
 
 
@@ -357,7 +359,7 @@ export function generatePlatformerLevel(
                 width /
                     2 >
             settings.level_length -
-                40
+                PLATFORMER_WORLD_EDGE_MARGIN
         ) {
             break;
         }
@@ -567,7 +569,7 @@ export function generatePlatformerLevel(
                     topEdge(
                         platform
                     ) -
-                    32
+                    PLATFORMER_ENTITY_HEIGHTS.enemy
             };
 
 
@@ -606,7 +608,7 @@ export function generatePlatformerLevel(
                     topEdge(
                         platform
                     ) -
-                    20
+                    hazardHeightAboveSurface(spec.player.movement)
             };
 
 
@@ -679,7 +681,7 @@ export function generatePlatformerLevel(
                 topEdge(
                     platform
                 ) -
-                76
+                PLATFORMER_ENTITY_HEIGHTS.collectible
         });
     }
 

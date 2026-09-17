@@ -2,11 +2,17 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "src/**/*.ts",
     "tests/**/*.ts",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "benchmark/**/*.ts",
+    "platformer-benchmark.config.ts",
+    "platformer-proof.config.ts",
+    "proof/**/*.ts"
   ]
 }

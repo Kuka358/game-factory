@@ -1,6 +1,8 @@
 import type {
-    GameSpec
+    GameSpec,
+    GameSpecValidationError
 } from "@game-factory/game-spec";
+import { reviewPlatformerSemantics } from "./platformer-semantics.js";
 
 import {
     AIError
@@ -21,6 +23,8 @@ import type {
 } from "../game-designer/GameDesigner.js";
 
 export interface GameReview {
+    // Deterministic issues reuse the authoritative validator's path/message shape.
+    issues?: GameSpecValidationError[];
     valid:
         boolean;
 
@@ -190,6 +194,17 @@ export class GameReviewer {
             );
         }
 
+        const semantic = reviewPlatformerSemantics(input);
+        if (semantic.errors.length) {
+            return {
+                review: {
+                    valid: false, issues: semantic.errors, warnings: semantic.warnings,
+                    suggested_changes: semantic.errors.map(issue => `${issue.path}: ${issue.message}`)
+                },
+                metadata: { provider: "deterministic", model: "platformer-semantics", promptId: "game-reviewer", promptVersion: this.promptVersion }
+            };
+        }
+
         const prompt =
             await this.options
                 .promptRegistry
@@ -277,7 +292,7 @@ export class GameReviewer {
             if (parsed.ok) {
                 return {
                     review:
-                        parsed.value,
+                        { ...parsed.value, warnings: [...semantic.warnings, ...parsed.value.warnings] },
 
                     metadata: {
                         provider:

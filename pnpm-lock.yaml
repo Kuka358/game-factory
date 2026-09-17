@@ -111,6 +111,9 @@ importers:
       '@game-factory/game-spec':
         specifier: workspace:*
         version: link:../game-spec
+      '@game-factory/runtime':
+        specifier: workspace:*
+        version: link:../runtime
       '@game-factory/templates':
         specifier: workspace:*
         version: link:../templates

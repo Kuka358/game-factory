@@ -11,6 +11,7 @@ import type {
 } from "../input/PhaserInputService.js";
 
 export interface GameFactoryDebugBridge {
+    readonly platformerDiagnostics?: import("@game-factory/runtime").PlatformerDiagnostics;
     getState(): GameDebugState;
 
     getScene(): string | null;
@@ -46,6 +47,7 @@ export function installGameFactoryDebugBridge(
     };
 
     window.__GAME_FACTORY__ = {
+        get platformerDiagnostics() { return ctx.debug.platformerDiagnostics; },
         getState(): GameDebugState {
             return ctx.debug.getState();
         },

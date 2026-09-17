@@ -31,6 +31,20 @@ For an endless runner specifically:
 - game over must be possible through obstacle collision;
 - restart must be compatible with the template.
 
+For a platformer specifically:
+- deterministic Reviewer checks run before this LLM review; do not override their failures;
+- schema validation already owns landscape-only orientation, controls, bounds and min/max ordering;
+- the generator clamps requested gaps/rises to jump reach; do not reject large requested gaps solely from a ballistic estimate;
+- movement requires keyboard input; pointer jump supports mouse as well as touch;
+- enemies and hazards are stationary and lethal, with no combat or health; enemies take priority over hazards;
+- collectible density is a probability, not a required count; score is +10 per collectible and never gates the exit;
+- the generator always supplies spawn and a final-platform goal; optional goal artwork is not a gameplay requirement;
+- camera follow, falling death and jump-to-restart are runtime behavior, not missing spec fields;
+- absent optional assets have fallbacks; capability validation has already checked supported roles/profiles;
+- assess consistency with the original request, but do not invent counts, score targets, camera settings or win rules;
+- report unsupported requested mechanics and subjective tuning as limitations/warnings when the represented game remains implementable;
+- do not claim arbitrary-seed playability or perform concrete-level pathfinding; browser QA owns the generated game.
+
 Set valid to false only for problems that should block generation.
 
 Warnings are non-blocking risks or quality concerns.

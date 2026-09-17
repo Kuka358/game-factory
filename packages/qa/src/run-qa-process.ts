@@ -10,6 +10,7 @@ import {
 
 export interface RunQaOptions {
     buildDir: string;
+    suite?: "platformer-benchmark" | "platformer-proof";
     headed?: boolean;
 }
 
@@ -64,6 +65,12 @@ export async function runQa(
         "test"
     ];
 
+    if (options.suite === "platformer-benchmark") {
+        playwrightArgs.push("--config", "platformer-benchmark.config.ts");
+    }
+    if (options.suite === "platformer-proof") {
+        playwrightArgs.push("--config", "platformer-proof.config.ts");
+    }
     if (options.headed) {
         playwrightArgs.push(
             "--headed"

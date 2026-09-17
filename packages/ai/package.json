@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@game-factory/runtime": "workspace:*",
     "@game-factory/game-spec": "workspace:*",
     "@game-factory/templates": "workspace:*"
   },

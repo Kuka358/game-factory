@@ -1,3 +1,5 @@
+import type { PlatformerDiagnostics } from "./PlatformerDiagnostics.js";
+
 export interface GameDebugPlayerState {
     alive: boolean;
     x: number;
@@ -32,6 +34,7 @@ export interface PlatformerDebugDetails {
     completed: boolean;
     cameraX: number;
     playerBody: DebugRectangle;
+    playerVelocity?: { x: number; y: number };
     platforms: DebugRectangle[];
     goal: DebugRectangle;
     enemies: DebugRectangle[];
@@ -55,6 +58,7 @@ const EMPTY_STATE: GameDebugState = {
 };
 
 export class DebugService {
+    platformerDiagnostics?: PlatformerDiagnostics;
     private stateProvider:
         (() => GameDebugState) | null = null;
 

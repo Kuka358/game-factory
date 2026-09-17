@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "noEmit": true, "types": ["node"] },
+  "include": ["scripts/*.mts", "tests/platformer-benchmark.test.ts", "tests/platformer-traversal.test.ts", "tests/platformer-lookahead.test.ts", "tests/platformer-proof.test.ts", "tests/platformer-hazard-clearance.test.ts", "tests/platformer-input.test.ts"]
+}

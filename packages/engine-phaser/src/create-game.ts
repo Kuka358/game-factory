@@ -5,7 +5,8 @@ import type {
 } from "@game-factory/game-spec";
 
 import {
-    createGameContext
+    createGameContext,
+    ARCADE_PHYSICS_FPS
 } from "@game-factory/runtime";
 
 import type {
@@ -132,6 +133,7 @@ export function createPhaserGame(
                     y: ARCADE_GRAVITY_Y
                 },
 
+                fps: ARCADE_PHYSICS_FPS,
                 debug: true
             }
         },

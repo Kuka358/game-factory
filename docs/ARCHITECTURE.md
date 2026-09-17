@@ -1,6 +1,6 @@
 # Architecture
 
-This describes the implementation through Stage 13.12 prompt-to-Platformer E2E.
+This describes the implementation through Stage 13.16 Platformer traversal lookahead.
 See DEVELOPMENT_STATUS.md, PLATFORMER_E2E.md and ROADMAP.md for verification scope.
 
 ## Packages and pipeline
@@ -43,6 +43,31 @@ asset capabilities and Reviewer approval before invoking the unchanged build pip
 Platformer is landscape-only. Production LLM providers are reused; the new E2E
 uses a deterministic local fake LLM over the existing OpenAI-compatible transport.
 
+Reviewer now runs deterministic Platformer semantic checks before LLM review,
+using the same gameplay constants as Phaser. Failures feed the existing repair
+loop; optional score/priority concerns remain warnings. See
+[PLATFORMER_REVIEWER.md](PLATFORMER_REVIEWER.md) for ownership, precise rejection
+conditions and limits. This is not arbitrary-seed playability certification.
+
+The optional robustness benchmark reuses these same validation/review, generation,
+builtin builder and QA components, recording separate phases and observed completion
+across a fixed spec/seed matrix. A separate Playwright config uses the same server
+and shared Platformer driver; ordinary regressions do not enforce its success rate.
+See [PLATFORMER_BENCHMARK.md](PLATFORMER_BENCHMARK.md) for measurement and reproduction.
+
+Stage 13.15 adds a small QA-owned analytic traversal diagnostic using runtime
+physics constants, plus optional velocity on the existing debug bridge. The
+shared QA driver uses safe candidate regions and records action evidence. No
+generator, GameSpec or Reviewer architecture changes are involved. See
+[PLATFORMER_RELIABILITY.md](PLATFORMER_RELIABILITY.md) for scope and verification.
+
+Stage 13.16 extends this same driver with three samples per safe interval, one
+onward transition, geometry-derived delayed horizontal input, and ceiling-aware
+arc estimates. Candidate continuation is a ranking estimate; actual state is read
+again after landing. Intermediate contact uncertainty and evidence-gated failure
+classification remain QA-owned. GameSpec, Reviewer, generator, physics and assets
+are unchanged. See [PLATFORMER_LOOKAHEAD.md](PLATFORMER_LOOKAHEAD.md).
+
 ## Platformer
 
 The schema supports landscape/template/Phaser games. The level generator uses the
@@ -62,9 +87,28 @@ deterministic SVG atlas when a tileset is requested. The score HUD works without
 its decorative icon.
 
 Platform collision rectangles are independent of generated tiles. Other entity
-hitboxes use fixed world-space dimensions in `platformer-bodies.ts`; dynamic
+hitboxes use fixed world-space dimensions from `runtime/src/platformer-physics.ts`,
+re-exported by `platformer-bodies.ts`; dynamic
 body sizes compensate for visual scale before passing dimensions to Phaser.
 The debug bridge exposes read-only geometry and gameplay state for browser QA.
+
+Stage 13.17 adds an opt-in `?platformerDiagnostics=1` debug provider for bounded
+real-Arcade step capture and isolated supported-input trials. It is absent in
+normal games. Diagnostic support-region graphs preserve uncertain transitions;
+only sufficient geometry/physics cut certificates can establish no goal route.
+These tools do not run in Reviewer or gameplay navigation.
+
+Platformer QA releases movement using observed horizontal advance between render
+samples, accounting for old velocity being integrated before a released key is
+consumed. The same self-contained browser callback is covered by deterministic
+input-cadence tests. Route selection remains the existing bounded lookahead.
+
+After proving four low-jump layouts unreachable, hazard generation now limits
+exposed height when a height-reachable lethal body is too wide to clear during
+the jump. It preserves hazard body dimensions, counts, horizontal placement and
+random streams. Gravity, speed and jump force are unchanged; the existing 60 Hz
+Arcade default is explicitly shared. This local clearance invariant does not
+certify arbitrary generated routes. See [PLATFORMER_PHYSICS_PROOF.md](PLATFORMER_PHYSICS_PROOF.md).
 
 ## Assets
 

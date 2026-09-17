@@ -1,2 +1,1 @@
-export const ARCADE_GRAVITY_Y =
-    1200;
+export { ARCADE_GRAVITY_Y } from "@game-factory/runtime";
