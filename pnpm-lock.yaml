@@ -160,6 +160,12 @@ importers:
         specifier: ^3
         version: 3.2.7(@types/node@26.2.0)(lightningcss@1.33.0)(tsx@4.23.12)
 
+  packages/autonomy:
+    devDependencies:
+      vitest:
+        specifier: ^3
+        version: 3.2.7(@types/node@26.3.0)(lightningcss@1.33.0)(tsx@4.23.12)
+
   packages/builder:
     dependencies:
       '@game-factory/assets':
