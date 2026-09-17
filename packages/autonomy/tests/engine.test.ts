@@ -7,6 +7,8 @@ import {
 import {
     AutonomyEngine,
     createAutonomousRun,
+    MemoryEventJournal,
+    MemoryRunStore,
     type CodingWorker,
     type FailureAdvisor,
     type Planner,
@@ -220,6 +222,152 @@ describe(
                 ).toBe(
                     "Goal reached"
                 );
+            }
+        );
+
+        it(
+            "persists run state and writes lifecycle events",
+            async () => {
+                let planningCalls =
+                    0;
+
+                const planner:
+                    Planner = {
+                        async plan() {
+                            planningCalls +=
+                                1;
+
+                            return planningCalls ===
+                                1
+                                ? {
+                                    type:
+                                        "iteration",
+
+                                    contract
+                                }
+                                : {
+                                    type:
+                                        "complete",
+
+                                    reason:
+                                        "Persisted"
+                                };
+                        }
+                    };
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            return {
+                                summary:
+                                    "Changed one file",
+
+                                changedFiles: [
+                                    "packages/example/file.ts"
+                                ]
+                            };
+                        }
+                    };
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            return {
+                                passed:
+                                    true,
+
+                                checks:
+                                    []
+                            };
+                        }
+                    };
+
+                const failureAdvisor:
+                    FailureAdvisor = {
+                        async advise() {
+                            throw new Error(
+                                "Should not escalate"
+                            );
+                        }
+                    };
+
+                const runStore =
+                    new MemoryRunStore();
+
+                const eventJournal =
+                    new MemoryEventJournal();
+
+                let clock =
+                    0;
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        failureAdvisor,
+                        runStore,
+                        eventJournal,
+
+                        now: () =>
+                            `2026-09-17T00:00:${String(
+                                clock++
+                            ).padStart(
+                                2,
+                                "0"
+                            )}.000Z`
+                    });
+
+                const run =
+                    createAutonomousRun({
+                        id:
+                            "run-persisted",
+
+                        goal:
+                            "Persist execution",
+
+                        maxIterations:
+                            3,
+
+                        now:
+                            "2026-09-17T00:00:00.000Z"
+                    });
+
+                const result =
+                    await engine.run(
+                        run
+                    );
+
+                const saved =
+                    await runStore.load(
+                        run.id
+                    );
+
+                expect(
+                    saved
+                ).toEqual(
+                    result
+                );
+
+                const events =
+                    await eventJournal.read(
+                        run.id
+                    );
+
+                expect(
+                    events.map(
+                        event =>
+                            event.type
+                    )
+                ).toEqual([
+                    "run_started",
+                    "iteration_planned",
+                    "worker_attempt_started",
+                    "worker_attempt_completed",
+                    "verification_completed",
+                    "iteration_completed",
+                    "run_completed"
+                ]);
             }
         );
 

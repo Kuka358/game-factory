@@ -16,6 +16,15 @@ import type {
     VerificationReport
 } from "./state.js";
 
+import type {
+    AutonomyEvent,
+    EventJournal
+} from "./events.js";
+
+import type {
+    RunStore
+} from "./persistence.js";
+
 
 export interface AutonomyEngineDependencies {
     planner:
@@ -29,14 +38,31 @@ export interface AutonomyEngineDependencies {
 
     failureAdvisor:
         FailureAdvisor;
+
+    runStore?:
+        RunStore;
+
+    eventJournal?:
+        EventJournal;
+
+    now?:
+        () => string;
 }
 
 
 export class AutonomyEngine {
+    private readonly now:
+        () => string;
+
     constructor(
         private readonly dependencies:
             AutonomyEngineDependencies
     ) {
+        this.now =
+            dependencies.now ??
+            (() =>
+                new Date()
+                    .toISOString());
     }
 
 
@@ -44,6 +70,25 @@ export class AutonomyEngine {
         run:
             AutonomousRun
     ): Promise<AutonomousRun> {
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    "run_started",
+
+                timestamp:
+                    this.now(),
+
+                details: {
+                    goal:
+                        run.goal
+                }
+            }
+        );
+
         while (
             run.currentIteration <
             run.maxIterations
@@ -51,7 +96,7 @@ export class AutonomyEngine {
             run.status =
                 "planning";
 
-            touchRun(
+            await this.persist(
                 run
             );
 
@@ -72,8 +117,27 @@ export class AutonomyEngine {
                 run.completionReason =
                     decision.reason;
 
-                touchRun(
+                await this.persist(
                     run
+                );
+
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "run_completed",
+
+                        timestamp:
+                            this.now(),
+
+                        details: {
+                            reason:
+                                decision.reason
+                        }
+                    }
                 );
 
                 return run;
@@ -89,12 +153,53 @@ export class AutonomyEngine {
                 run.failureReason =
                     decision.reason;
 
-                touchRun(
+                await this.persist(
                     run
+                );
+
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "run_blocked",
+
+                        timestamp:
+                            this.now(),
+
+                        details: {
+                            reason:
+                                run.failureReason
+                        }
+                    }
                 );
 
                 return run;
             }
+
+            await this.record(
+                run,
+                {
+                    runId:
+                        run.id,
+
+                    type:
+                        "iteration_planned",
+
+                    timestamp:
+                        this.now(),
+
+                    iterationId:
+                        decision.contract.id,
+
+                    details: {
+                        objective:
+                            decision.contract.objective
+                    }
+                }
+            );
 
             const result =
                 await this.runIteration(
@@ -109,7 +214,7 @@ export class AutonomyEngine {
             run.currentIteration +=
                 1;
 
-            touchRun(
+            await this.persist(
                 run
             );
         }
@@ -150,6 +255,10 @@ export class AutonomyEngine {
             record
         );
 
+        await this.persist(
+            run
+        );
+
         let previousVerification:
             VerificationReport |
             undefined;
@@ -179,12 +288,30 @@ export class AutonomyEngine {
                     attempt,
 
                     startedAt:
-                        new Date()
-                            .toISOString()
+                        this.now()
                 };
 
             record.attempts.push(
                 attemptRecord
+            );
+
+            await this.record(
+                run,
+                {
+                    runId:
+                        run.id,
+
+                    type:
+                        "worker_attempt_started",
+
+                    timestamp:
+                        this.now(),
+
+                    iterationId:
+                        contract.id,
+
+                    attempt
+                }
             );
 
             try {
@@ -203,8 +330,39 @@ export class AutonomyEngine {
                             repairInstructions
                         });
 
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "worker_attempt_completed",
+
+                        timestamp:
+                            this.now(),
+
+                        iterationId:
+                            contract.id,
+
+                        attempt,
+
+                        details: {
+                            summary:
+                                workerResult.summary,
+
+                            changedFiles:
+                                workerResult.changedFiles
+                        }
+                    }
+                );
+
                 run.status =
                     "verifying";
+
+                await this.persist(
+                    run
+                );
 
                 touchRun(
                     run
@@ -223,18 +381,64 @@ export class AutonomyEngine {
                             workerResult
                         });
 
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "verification_completed",
+
+                        timestamp:
+                            this.now(),
+
+                        iterationId:
+                            contract.id,
+
+                        attempt,
+
+                        details: {
+                            passed:
+                                verification.passed
+                        }
+                    }
+                );
+
                 attemptRecord.verification =
                     verification;
 
                 attemptRecord.completedAt =
-                    new Date()
-                        .toISOString();
+                    this.now();
 
                 if (
                     verification.passed
                 ) {
                     record.completed =
                         true;
+
+                    await this.persist(
+                        run
+                    );
+
+                    await this.record(
+                        run,
+                        {
+                            runId:
+                                run.id,
+
+                            type:
+                                "iteration_completed",
+
+                            timestamp:
+                                this.now(),
+
+                            iterationId:
+                                contract.id,
+
+                            attempt
+                        }
+                    );
 
                     return true;
                 }
@@ -259,6 +463,29 @@ export class AutonomyEngine {
 
                 touchRun(
                     run
+                );
+
+                await this.persist(
+                    run
+                );
+
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "escalation_requested",
+
+                        timestamp:
+                            this.now(),
+
+                        iterationId:
+                            contract.id,
+
+                        attempt
+                    }
                 );
 
                 const escalation =
@@ -311,6 +538,30 @@ export class AutonomyEngine {
                     attempt +=
                         1;
 
+                    await this.record(
+                        run,
+                        {
+                            runId:
+                                run.id,
+
+                            type:
+                                "repair_requested",
+
+                            timestamp:
+                                this.now(),
+
+                            iterationId:
+                                contract.id,
+
+                            attempt,
+
+                            details: {
+                                instructions:
+                                    escalation.instructions
+                            }
+                        }
+                    );
+
                     continue;
                 }
 
@@ -323,6 +574,29 @@ export class AutonomyEngine {
 
                     run.failureReason =
                         escalation.reason;
+
+                    await this.persist(
+                        run
+                    );
+
+                    await this.record(
+                        run,
+                        {
+                            runId:
+                                run.id,
+
+                            type:
+                                "run_failed",
+
+                            timestamp:
+                                this.now(),
+
+                            details: {
+                                reason:
+                                    escalation.reason
+                            }
+                        }
+                    );
 
                     touchRun(
                         run
@@ -340,6 +614,29 @@ export class AutonomyEngine {
 
                     run.failureReason =
                         escalation.question;
+
+                    await this.persist(
+                        run
+                    );
+
+                    await this.record(
+                        run,
+                        {
+                            runId:
+                                run.id,
+
+                            type:
+                                "run_blocked",
+
+                            timestamp:
+                                this.now(),
+
+                            details: {
+                                reason:
+                                    escalation.question
+                            }
+                        }
+                    );
 
                     touchRun(
                         run
@@ -367,8 +664,7 @@ export class AutonomyEngine {
                         : String(error);
 
                 attemptRecord.completedAt =
-                    new Date()
-                        .toISOString();
+                    this.now();
 
                 run.status =
                     "failed";
@@ -380,11 +676,77 @@ export class AutonomyEngine {
                     run
                 );
 
+                await this.persist(
+                    run
+                );
+
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "run_failed",
+
+                        timestamp:
+                            this.now(),
+
+                        details: {
+                            reason:
+                                attemptRecord.error
+                        }
+                    }
+                );
+
                 return false;
             }
         }
 
         return false;
+    }
+
+    private async persist(
+        run:
+            AutonomousRun
+    ): Promise<void> {
+        run.updatedAt =
+            this.now();
+
+        if (
+            this.dependencies
+                .runStore
+        ) {
+            await this.dependencies
+                .runStore
+                .save(
+                    run
+                );
+        }
+    }
+
+
+    private async record(
+        run:
+            AutonomousRun,
+
+        event:
+            AutonomyEvent
+    ): Promise<void> {
+        if (
+            this.dependencies
+                .eventJournal
+        ) {
+            await this.dependencies
+                .eventJournal
+                .append(
+                    event
+                );
+        }
+
+        await this.persist(
+            run
+        );
     }
 }
 
