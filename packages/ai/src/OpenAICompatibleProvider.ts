@@ -38,6 +38,9 @@ interface ChatCompletionResponseDto {
                 content:
                     string;
             };
+
+            finishReason?:
+                string | null;
         }>;
 
     usage?: {
@@ -182,7 +185,9 @@ export class OpenAICompatibleProvider
                 parseContent<T>(
                     content,
                     request,
-                    this.id
+                    this.id,
+                    parsed.choices[0]!
+                        .finishReason
                 );
 
             return {
@@ -380,7 +385,10 @@ function parseContent<T>(
         AIRequest,
 
     provider:
-        string
+        string,
+
+    finishReason?:
+        string | null
 ): T {
     if (
         !request.structuredOutput
@@ -393,10 +401,41 @@ function parseContent<T>(
             content
         ) as T;
     } catch (error) {
+        const trimmed =
+            content.trim();
+
+        const maximumPreviewLength =
+            1500;
+
+        const preview =
+            trimmed.length ===
+            0
+                ? "<empty>"
+                : trimmed.length >
+                  maximumPreviewLength
+                    ? `${trimmed.slice(
+                          0,
+                          maximumPreviewLength
+                      )}...`
+                    : trimmed;
+
+        const finishReasonText =
+            finishReason
+                ? ` finish_reason=${finishReason}.`
+                : "";
+
         throw new AIError(
             "structured_output_failed",
 
-            "AI provider returned invalid JSON for structured output",
+            [
+                "AI provider returned invalid JSON for structured output.",
+                finishReasonText,
+                `Raw content preview: ${JSON.stringify(
+                    preview
+                )}`
+            ].join(
+                ""
+            ),
 
             provider,
 
@@ -465,6 +504,18 @@ function parseResponse(
             value.usage
         );
 
+    const finishReason =
+        typeof firstChoice
+            .finish_reason ===
+            "string"
+            ? firstChoice
+                .finish_reason
+            : firstChoice
+                .finish_reason ===
+            null
+                ? null
+                : undefined;
+
     return {
         model,
 
@@ -475,7 +526,9 @@ function parseResponse(
                         firstChoice
                             .message
                             .content
-                }
+                },
+
+                finishReason
             }
         ],
 

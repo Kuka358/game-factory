@@ -18,7 +18,8 @@
     "e2e:platformer:designer": "pnpm build && pnpm --filter @game-factory/qa exec tsx ../../scripts/platformer-designer-e2e.mts",
     "benchmark:platformer": "pnpm --filter @game-factory/qa exec tsx ../orchestrator/scripts/platformer-benchmark.mts",
     "e2e:platformer:lookahead": "pnpm build && pnpm benchmark:platformer --spec narrow-fast --seed 1 --expect-pass",
-    "ai:lmstudio:smoke": "pnpm --filter @game-factory/ai build && node --env-file=.env scripts/test-lmstudio.mjs"
+    "ai:lmstudio:smoke": "pnpm --filter @game-factory/ai build && node --env-file=.env scripts/test-lmstudio.mjs",
+    "autonomy:lmstudio:smoke": "pnpm --filter @game-factory/ai build && pnpm --filter @game-factory/autonomy build && node --env-file=.env scripts/test-autonomy-lmstudio.mjs"
   },
   "devDependencies": {
     "typescript": "^5"
