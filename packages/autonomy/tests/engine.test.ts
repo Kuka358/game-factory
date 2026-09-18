@@ -227,6 +227,141 @@ describe(
         );
 
         it(
+            "allows the planner to complete after exactly reaching the iteration limit",
+            async () => {
+                let planningCalls =
+                    0;
+
+                let workerCalls =
+                    0;
+
+                const planner:
+                    Planner = {
+                        async plan() {
+                            planningCalls +=
+                                1;
+
+                            if (
+                                planningCalls ===
+                                1
+                            ) {
+                                return {
+                                    type:
+                                        "iteration",
+
+                                    contract
+                                };
+                            }
+
+                            return {
+                                type:
+                                    "complete",
+
+                                reason:
+                                    "Goal reached at iteration limit"
+                            };
+                        }
+                    };
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            workerCalls +=
+                                1;
+
+                            return {
+                                summary:
+                                    "Implemented",
+
+                                changedFiles:
+                                    []
+                            };
+                        }
+                    };
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            return {
+                                passed:
+                                    true,
+
+                                checks:
+                                    []
+                            };
+                        }
+                    };
+
+                const failureAdvisor:
+                    FailureAdvisor = {
+                        async advise() {
+                            throw new Error(
+                                "Failure advisor should not execute"
+                            );
+                        }
+                    };
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        failureAdvisor
+                    });
+
+                const result =
+                    await engine.run(
+                        createAutonomousRun({
+                            id:
+                                "exact-iteration-limit",
+
+                            goal:
+                                "Complete exactly at iteration limit",
+
+                            maxIterations:
+                                1
+                        })
+                    );
+
+                expect(
+                    result.status
+                ).toBe(
+                    "completed"
+                );
+
+                expect(
+                    result.currentIteration
+                ).toBe(
+                    1
+                );
+
+                expect(
+                    result.iterations
+                ).toHaveLength(
+                    1
+                );
+
+                expect(
+                    planningCalls
+                ).toBe(
+                    2
+                );
+
+                expect(
+                    workerCalls
+                ).toBe(
+                    1
+                );
+
+                expect(
+                    result.completionReason
+                ).toBe(
+                    "Goal reached at iteration limit"
+                );
+            }
+        );
+
+        it(
             "resumes a recovered run without repeating completed iterations",
             async () => {
                 const store =

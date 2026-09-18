@@ -117,10 +117,7 @@ export class AutonomyEngine {
             }
         );
 
-        while (
-            run.currentIteration <
-            run.maxIterations
-        ) {
+        while (true) {
             run.status =
                 "planning";
 
@@ -207,6 +204,42 @@ export class AutonomyEngine {
                 return run;
             }
 
+            if (
+                run.currentIteration >=
+                run.maxIterations
+            ) {
+                run.status =
+                    "blocked";
+
+                run.failureReason =
+                    "Maximum autonomous iteration count reached";
+
+                await this.persist(
+                    run
+                );
+
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "run_blocked",
+
+                        timestamp:
+                            this.now(),
+
+                        details: {
+                            reason:
+                                run.failureReason
+                        }
+                    }
+                );
+
+                return run;
+            }
+
             await this.record(
                 run,
                 {
@@ -256,37 +289,6 @@ export class AutonomyEngine {
                 run
             );
         }
-
-        run.status =
-            "blocked";
-
-        run.failureReason =
-            "Maximum autonomous iteration count reached";
-
-        await this.persist(
-            run
-        );
-
-        await this.record(
-            run,
-            {
-                runId:
-                    run.id,
-
-                type:
-                    "run_blocked",
-
-                timestamp:
-                    this.now(),
-
-                details: {
-                    reason:
-                        run.failureReason
-                }
-            }
-        );
-
-        return run;
     }
 
     async resume(
@@ -1322,18 +1324,17 @@ export class AutonomyEngine {
             return;
         }
 
-        const settle =
+        const worker =
             this.dependencies
-                .worker
-                .settle;
+                .worker;
 
-        if (!settle) {
+        if (!worker.settle) {
             throw new Error(
                 "Active worker workspace cannot be settled because worker.settle() is unavailable"
             );
         }
 
-        await settle({
+        await worker.settle({
             run,
 
             contract:
@@ -1474,19 +1475,18 @@ export class AutonomyEngine {
             );
         }
 
-        const settle =
+        const worker =
             this.dependencies
-                .worker
-                .settle;
+                .worker;
 
-        if (!settle) {
+        if (!worker.settle) {
             throw new Error(
                 "Pending iteration acceptance requires worker settlement support"
             );
         }
 
         const result =
-            await settle({
+            await worker.settle({
                 run,
 
                 contract:
