@@ -14,3 +14,4 @@ export * from "./harness.js";
 export * from "./harness-worker.js";
 export * from "./git-worktree.js";
 export * from "./isolated-harness-worker.js";
+export * from "./verified-commit.js";
