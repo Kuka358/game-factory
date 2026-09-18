@@ -161,6 +161,10 @@ importers:
         version: 3.2.7(@types/node@26.2.0)(lightningcss@1.33.0)(tsx@4.23.12)
 
   packages/autonomy:
+    dependencies:
+      '@game-factory/ai':
+        specifier: workspace:*
+        version: link:../ai
     devDependencies:
       '@types/node':
         specifier: ^26.2.0
