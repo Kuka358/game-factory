@@ -304,6 +304,49 @@ export class GitWorktreeManager {
             dirtyScope.length >
             0
         ) {
+            const expectedFiles =
+                [...snapshot.changedFiles]
+                    .sort();
+
+            const actualScopedFiles =
+                deduplicatePaths(
+                    dirtyScope
+                ).sort();
+
+            const sameFiles =
+                expectedFiles.length ===
+                    actualScopedFiles.length &&
+                expectedFiles.every(
+                    (
+                        path,
+                        index
+                    ) =>
+                        path ===
+                        actualScopedFiles[index]
+                );
+
+            if (sameFiles) {
+                const mainSnapshot =
+                    await this.snapshotPaths(
+                        this.repositoryRoot,
+                        snapshot.changedFiles
+                    );
+
+                if (
+                    mainSnapshot.digest ===
+                    expectedDigest
+                ) {
+                    /*
+                    * The verified promotion already happened before a
+                    * process interruption. Treat replay as success.
+                    */
+                    return {
+                        changedFiles:
+                            snapshot.changedFiles
+                    };
+                }
+            }
+
             throw new Error(
                 `Cannot promote isolated worktree: main iteration scope is dirty: ${dirtyScope.join(", ")}`
             );
@@ -620,6 +663,11 @@ export class GitWorktreeManager {
                 ...untracked
             ]);
 
+        return this.snapshotPaths(
+            worktree.path,
+            changedFiles
+        );
+
         const trackedPatch =
             await this.runGit(
                 worktree.path,
@@ -790,6 +838,145 @@ export class GitWorktreeManager {
                         expected
                     )
             );
+    }
+
+    private async snapshotPaths(
+        cwd:
+            string,
+
+        paths:
+            readonly string[]
+    ): Promise<GitWorktreeSnapshot> {
+        const normalizedPaths =
+            deduplicatePaths(
+                paths
+            ).sort();
+
+        const hash =
+            createHash(
+                "sha256"
+            );
+
+        hash.update(
+            "tracked\0"
+        );
+
+        if (
+            normalizedPaths.length ===
+            0
+        ) {
+            return {
+                changedFiles:
+                    [],
+
+                digest:
+                    hash.digest(
+                        "hex"
+                    )
+            };
+        }
+
+        const trackedRaw =
+            await this.runGit(
+                cwd,
+                [
+                    "diff",
+                    "--name-only",
+                    "-z",
+                    "--no-renames",
+                    "HEAD",
+                    "--",
+                    ...normalizedPaths
+                ]
+            );
+
+        const untrackedRaw =
+            await this.runGit(
+                cwd,
+                [
+                    "ls-files",
+                    "--others",
+                    "--exclude-standard",
+                    "-z",
+                    "--",
+                    ...normalizedPaths
+                ]
+            );
+
+        const tracked =
+            parseNullSeparatedPaths(
+                trackedRaw
+            );
+
+        const untracked =
+            parseNullSeparatedPaths(
+                untrackedRaw
+            );
+
+        const changedFiles =
+            deduplicatePaths([
+                ...tracked,
+                ...untracked
+            ]);
+
+        const trackedPatch =
+            await this.runGit(
+                cwd,
+                [
+                    "diff",
+                    "--binary",
+                    "--full-index",
+                    "HEAD",
+                    "--",
+                    ...normalizedPaths
+                ]
+            );
+
+        hash.update(
+            trackedPatch
+        );
+
+        for (
+            const path of
+            [...untracked].sort()
+        ) {
+            const absolute =
+                resolve(
+                    cwd,
+                    path
+                );
+
+            assertInsideDirectory(
+                cwd,
+                absolute
+            );
+
+            hash.update(
+                "\0untracked\0"
+            );
+
+            hash.update(
+                path
+            );
+
+            hash.update(
+                "\0"
+            );
+
+            hash.update(
+                await readFile(
+                    absolute
+                )
+            );
+        }
+
+        return {
+            changedFiles,
+            digest:
+                hash.digest(
+                    "hex"
+                )
+        };
     }
 }
 

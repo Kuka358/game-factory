@@ -44,6 +44,12 @@ export interface VerifiedCommitInput {
 
     message:
         string;
+
+    acceptanceId?:
+        string;
+
+    digest?:
+        string;
 }
 
 
@@ -52,6 +58,9 @@ export interface VerifiedCommitResult {
         string;
 
     committed:
+        boolean;
+
+    alreadyCommitted?:
         boolean;
 }
 
@@ -81,10 +90,65 @@ export class VerifiedCommitManager {
         const currentHead =
             await this.getHead();
 
+        const hasAcceptanceId =
+            input.acceptanceId !==
+            undefined;
+
+        const hasDigest =
+            input.digest !==
+            undefined;
+
+        if (
+            hasAcceptanceId !==
+            hasDigest
+        ) {
+            throw new Error(
+                "Verified commit acceptanceId and digest must be provided together"
+            );
+        }
+
+        if (
+            input.acceptanceId
+        ) {
+            assertSingleLine(
+                input.acceptanceId,
+                "Verified commit acceptanceId"
+            );
+        }
+
+        if (
+            input.digest
+        ) {
+            assertSingleLine(
+                input.digest,
+                "Verified commit digest"
+            );
+        }
+
         if (
             currentHead !==
             input.baseRevision
         ) {
+            if (
+                input.acceptanceId &&
+                input.digest &&
+                await this.matchesAcceptedCommit(
+                    currentHead,
+                    input
+                )
+            ) {
+                return {
+                    revision:
+                        currentHead,
+
+                    committed:
+                        true,
+
+                    alreadyCommitted:
+                        true
+                };
+            }
+
             throw new Error(
                 `Cannot commit verified changes: repository HEAD changed from ${input.baseRevision} to ${currentHead}`
             );
@@ -176,15 +240,39 @@ export class VerifiedCommitManager {
             ]);
         }
 
-        await this.runGit([
-            "commit",
-            "--only",
-            "--no-verify",
-            "-m",
-            message,
+        const commitArgs:
+            string[] = [
+                "commit",
+                "--only",
+                "--no-verify",
+                "-m",
+                message
+            ];
+
+        if (
+            input.acceptanceId &&
+            input.digest
+        ) {
+            commitArgs.push(
+                "-m",
+                [
+                    `Game-Factory-Accept: ${input.acceptanceId}`,
+                    `Game-Factory-Digest: ${input.digest}`,
+                    `Game-Factory-Base: ${input.baseRevision}`
+                ].join(
+                    "\n"
+                )
+            );
+        }
+
+        commitArgs.push(
             "--",
             ...changedFiles
-        ]);
+        );
+
+        await this.runGit(
+            commitArgs
+        );
 
         const revision =
             await this.getHead();
@@ -315,6 +403,73 @@ export class VerifiedCommitManager {
             );
         }
     }
+
+    private async matchesAcceptedCommit(
+        revision:
+            string,
+
+        input:
+            VerifiedCommitInput
+    ): Promise<boolean> {
+        if (
+            !input.acceptanceId ||
+            !input.digest
+        ) {
+            return false;
+        }
+
+        let parent:
+            string;
+
+        try {
+            parent =
+                (
+                    await this.runGit([
+                        "rev-parse",
+                        `${revision}^`
+                    ])
+                ).trim();
+        } catch {
+            return false;
+        }
+
+        if (
+            parent !==
+            input.baseRevision
+        ) {
+            return false;
+        }
+
+        const message =
+            await this.runGit([
+                "show",
+                "-s",
+                "--format=%B",
+                revision
+            ]);
+
+        const lines =
+            message
+                .split(
+                    /\r?\n/
+                )
+                .map(
+                    line =>
+                        line.trim()
+                );
+
+        return (
+            lines.includes(
+                `Game-Factory-Accept: ${input.acceptanceId}`
+            ) &&
+            lines.includes(
+                `Game-Factory-Digest: ${input.digest}`
+            ) &&
+            lines.includes(
+                `Game-Factory-Base: ${input.baseRevision}`
+            )
+        );
+    }
 }
 
 
@@ -400,4 +555,27 @@ function isExecFileError(
 } {
     return value instanceof
         Error;
+}
+
+function assertSingleLine(
+    value:
+        string,
+
+    label:
+        string
+): void {
+    if (
+        value.length ===
+            0 ||
+        value.includes(
+            "\n"
+        ) ||
+        value.includes(
+            "\r"
+        )
+    ) {
+        throw new Error(
+            `${label} must be a non-empty single-line value`
+        );
+    }
 }

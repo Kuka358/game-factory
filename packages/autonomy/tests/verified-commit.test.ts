@@ -339,6 +339,106 @@ describe(
         );
 
         it(
+            "recognizes an already created verified commit during replay",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    const baseRevision =
+                        await getHead(
+                            repository
+                        );
+
+                    await writeFile(
+                        join(
+                            repository,
+                            "src",
+                            "main.txt"
+                        ),
+                        "accepted\n",
+                        "utf8"
+                    );
+
+                    const manager =
+                        new VerifiedCommitManager({
+                            repositoryRoot:
+                                repository
+                        });
+
+                    const input = {
+                        baseRevision,
+
+                        changedFiles: [
+                            "src/main.txt"
+                        ],
+
+                        message:
+                            "autonomy: verified iteration",
+
+                        acceptanceId:
+                            "acceptance-001",
+
+                        digest:
+                            "a".repeat(
+                                64
+                            )
+                    };
+
+                    const first =
+                        await manager.commit(
+                            input
+                        );
+
+                    const second =
+                        await manager.commit(
+                            input
+                        );
+
+                    expect(
+                        second
+                    ).toEqual({
+                        revision:
+                            first.revision,
+
+                        committed:
+                            true,
+
+                        alreadyCommitted:
+                            true
+                    });
+
+                    const count =
+                        await runGitOutput(
+                            repository,
+                            [
+                                "rev-list",
+                                "--count",
+                                `${baseRevision}..HEAD`
+                            ]
+                        );
+
+                    expect(
+                        count.trim()
+                    ).toBe(
+                        "1"
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
             "commits newly created verified files without consuming unrelated staged changes",
             async () => {
                 const repository =

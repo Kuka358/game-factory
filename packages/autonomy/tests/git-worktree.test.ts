@@ -714,6 +714,100 @@ describe(
         );
 
         it(
+            "allows verified promotion to be replayed after interruption",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    const manager =
+                        new GitWorktreeManager({
+                            repositoryRoot:
+                                repository
+                        });
+
+                    const worktree =
+                        await manager.create(
+                            "promotion-replay",
+                            "iteration",
+                            1
+                        );
+
+                    await writeFile(
+                        join(
+                            worktree.path,
+                            "src",
+                            "main.txt"
+                        ),
+                        "verified replay\n",
+                        "utf8"
+                    );
+
+                    const scope = {
+                        allowedPaths: [
+                            "src/**"
+                        ],
+
+                        forbiddenPaths:
+                            []
+                    };
+
+                    const snapshot =
+                        await manager
+                            .snapshotAllowedChanges(
+                                worktree,
+                                scope
+                            );
+
+                    await manager.promote(
+                        worktree,
+                        scope,
+                        snapshot.digest
+                    );
+
+                    await expect(
+                        manager.promote(
+                            worktree,
+                            scope,
+                            snapshot.digest
+                        )
+                    ).resolves.toEqual({
+                        changedFiles:
+                            snapshot.changedFiles
+                    });
+
+                    expect(
+                        await readFile(
+                            join(
+                                repository,
+                                "src",
+                                "main.txt"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        "verified replay\n"
+                    );
+
+                    await manager.remove(
+                        worktree
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
             "allows isolated worktree removal to be retried",
             async () => {
                 const repository =
