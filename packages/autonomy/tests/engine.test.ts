@@ -227,6 +227,314 @@ describe(
         );
 
         it(
+            "resumes a recovered run without repeating completed iterations",
+            async () => {
+                const store =
+                    new MemoryRunStore();
+
+                const checkpoints =
+                    new MemoryCheckpointManager();
+
+                const events =
+                    new MemoryEventJournal();
+
+                const interrupted =
+                    createAutonomousRun({
+                        id:
+                            "resume-run",
+
+                        goal:
+                            "Resume execution",
+
+                        maxIterations:
+                            3
+                    });
+
+                interrupted.currentIteration =
+                    1;
+
+                interrupted.status =
+                    "verifying";
+
+                interrupted.iterations.push(
+                    {
+                        contract,
+
+                        attempts:
+                            [],
+
+                        completed:
+                            true
+                    },
+                    {
+                        contract: {
+                            ...contract,
+
+                            id:
+                                "interrupted-iteration"
+                        },
+
+                        attempts: [
+                            {
+                                attempt:
+                                    1,
+
+                                startedAt:
+                                    "2026-09-18T00:00:00.000Z"
+                            }
+                        ],
+
+                        completed:
+                            false,
+
+                        checkpointId:
+                            "resume-checkpoint"
+                    }
+                );
+
+                await store.save(
+                    interrupted
+                );
+
+                const planner:
+                    Planner = {
+                        async plan() {
+                            return {
+                                type:
+                                    "complete",
+
+                                reason:
+                                    "Already done"
+                            };
+                        }
+                    };
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            throw new Error(
+                                "Worker must not execute"
+                            );
+                        }
+                    };
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            throw new Error(
+                                "Verifier must not execute"
+                            );
+                        }
+                    };
+
+                const failureAdvisor:
+                    FailureAdvisor = {
+                        async advise() {
+                            throw new Error(
+                                "Advisor must not execute"
+                            );
+                        }
+                    };
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        failureAdvisor,
+
+                        runStore:
+                            store,
+
+                        checkpointManager:
+                            checkpoints,
+
+                        eventJournal:
+                            events
+                    });
+
+                const result =
+                    await engine.resume(
+                        interrupted.id
+                    );
+
+                expect(
+                    result?.status
+                ).toBe(
+                    "completed"
+                );
+
+                expect(
+                    result?.currentIteration
+                ).toBe(
+                    1
+                );
+
+                expect(
+                    result?.iterations
+                ).toHaveLength(
+                    1
+                );
+
+                expect(
+                    checkpoints.restoredIds
+                ).toEqual([
+                    "resume-checkpoint"
+                ]);
+
+                const recordedEvents =
+                    await events.read(
+                        interrupted.id
+                    );
+
+                expect(
+                    recordedEvents.some(
+                        event =>
+                            event.type ===
+                            "run_recovered"
+                    )
+                ).toBe(
+                    true
+                );
+
+                expect(
+                    recordedEvents.some(
+                        event =>
+                            event.type ===
+                            "run_resumed"
+                    )
+                ).toBe(
+                    true
+                );
+            }
+        );
+
+        it(
+            "replans without counting a failed iteration",
+            async () => {
+                let planningCalls =
+                    0;
+
+                const planner:
+                    Planner = {
+                        async plan() {
+                            planningCalls +=
+                                1;
+
+                            if (
+                                planningCalls ===
+                                1
+                            ) {
+                                return {
+                                    type:
+                                        "iteration",
+
+                                    contract
+                                };
+                            }
+
+                            return {
+                                type:
+                                    "complete",
+
+                                reason:
+                                    "Replanned"
+                            };
+                        }
+                    };
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            return {
+                                summary:
+                                    "Failed attempt",
+
+                                changedFiles:
+                                    []
+                            };
+                        }
+                    };
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            return {
+                                passed:
+                                    false,
+
+                                checks:
+                                    []
+                            };
+                        }
+                    };
+
+                const failureAdvisor:
+                    FailureAdvisor = {
+                        async advise() {
+                            return {
+                                type:
+                                    "replan",
+
+                                reason:
+                                    "Need another plan"
+                            };
+                        }
+                    };
+
+                const checkpointManager =
+                    new MemoryCheckpointManager();
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        failureAdvisor,
+                        checkpointManager
+                    });
+
+                const result =
+                    await engine.run(
+                        createAutonomousRun({
+                            id:
+                                "replan-run",
+
+                            goal:
+                                "Replan correctly",
+
+                            maxIterations:
+                                3
+                        })
+                    );
+
+                expect(
+                    result.status
+                ).toBe(
+                    "completed"
+                );
+
+                expect(
+                    result.currentIteration
+                ).toBe(
+                    0
+                );
+
+                expect(
+                    result.iterations
+                ).toHaveLength(
+                    0
+                );
+
+                expect(
+                    checkpointManager.restoredIds
+                ).toEqual(
+                    checkpointManager.createdIds
+                );
+            }
+        );
+
+        it(
             "restores a checkpoint when worker execution fails",
             async () => {
                 const planner:

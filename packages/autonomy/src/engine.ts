@@ -26,6 +26,9 @@ import type {
     RunStore
 } from "./persistence.js";
 
+import {
+    RecoveryManager
+} from "./recovery.js";
 
 export interface AutonomyEngineDependencies {
     planner:
@@ -53,6 +56,17 @@ export interface AutonomyEngineDependencies {
         () => string;
 }
 
+export interface RunExecutionOptions {
+    resumed?:
+        boolean;
+}
+
+
+type IterationExecutionResult =
+    | "completed"
+    | "replan"
+    | "stopped";
+
 
 export class AutonomyEngine {
     private readonly now:
@@ -72,7 +86,10 @@ export class AutonomyEngine {
 
     async run(
         run:
-            AutonomousRun
+            AutonomousRun,
+
+        options:
+            RunExecutionOptions = {}
     ): Promise<AutonomousRun> {
         await this.record(
             run,
@@ -81,7 +98,9 @@ export class AutonomyEngine {
                     run.id,
 
                 type:
-                    "run_started",
+                    options.resumed
+                        ? "run_resumed"
+                        : "run_started",
 
                 timestamp:
                     this.now(),
@@ -211,8 +230,18 @@ export class AutonomyEngine {
                     decision.contract
                 );
 
-            if (!result) {
+            if (
+                result ===
+                "stopped"
+            ) {
                 return run;
+            }
+
+            if (
+                result ===
+                "replan"
+            ) {
+                continue;
             }
 
             run.currentIteration +=
@@ -255,6 +284,65 @@ export class AutonomyEngine {
         return run;
     }
 
+    async resume(
+        runId:
+            string
+    ): Promise<AutonomousRun | null> {
+        const runStore =
+            this.dependencies
+                .runStore;
+
+        if (!runStore) {
+            throw new Error(
+                "AutonomyEngine resume requires a RunStore"
+            );
+        }
+
+        const recoveryManager =
+            new RecoveryManager({
+                runStore,
+
+                checkpointManager:
+                    this.dependencies
+                        .checkpointManager,
+
+                eventJournal:
+                    this.dependencies
+                        .eventJournal,
+
+                now:
+                    this.now
+            });
+
+        const recovery =
+            await recoveryManager
+                .recover(
+                    runId
+                );
+
+        if (
+            recovery.type ===
+            "not_found"
+        ) {
+            return null;
+        }
+
+        if (
+            recovery.type ===
+            "terminal"
+        ) {
+            return recovery.run;
+        }
+
+        return this.run(
+            recovery.run,
+            {
+                resumed:
+                    true
+            }
+        );
+    }
+
 
     private async runIteration(
         run:
@@ -262,7 +350,7 @@ export class AutonomyEngine {
 
         contract:
             IterationContract
-    ): Promise<boolean> {
+    ): Promise<IterationExecutionResult> {
         const record:
             IterationRecord = {
                 contract,
@@ -502,7 +590,7 @@ export class AutonomyEngine {
                         }
                     );
 
-                    return true;
+                    return "completed";
                 }
 
                 previousVerification =
@@ -586,7 +674,7 @@ export class AutonomyEngine {
                             run
                         );
 
-                        return false;
+                        return "stopped";
                     }
 
                     escalationRepairRounds +=
@@ -666,7 +754,7 @@ export class AutonomyEngine {
                         }
                     );
 
-                    return false;
+                    return "stopped";
                 }
 
                 if (
@@ -707,7 +795,7 @@ export class AutonomyEngine {
                         }
                     );
 
-                    return false;
+                    return "stopped";
                 }
 
                 if (
@@ -719,10 +807,51 @@ export class AutonomyEngine {
                         record
                     );
 
-                    return true;
+                    const recordIndex =
+                        run.iterations.indexOf(
+                            record
+                        );
+
+                    if (
+                        recordIndex >=
+                        0
+                    ) {
+                        run.iterations.splice(
+                            recordIndex,
+                            1
+                        );
+                    }
+
+                    await this.persist(
+                        run
+                    );
+
+                    await this.record(
+                        run,
+                        {
+                            runId:
+                                run.id,
+
+                            type:
+                                "iteration_replanned",
+
+                            timestamp:
+                                this.now(),
+
+                            iterationId:
+                                contract.id,
+
+                            details: {
+                                reason:
+                                    escalation.reason
+                            }
+                        }
+                    );
+
+                    return "replan";
                 }
 
-                return false;
+                return "stopped";
             } catch (error) {
                 attemptRecord.error =
                     error instanceof Error
@@ -766,11 +895,9 @@ export class AutonomyEngine {
                     }
                 );
 
-                return false;
+                return "stopped";
             }
         }
-
-        return false;
     }
 
     private async releaseCheckpoint(

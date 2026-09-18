@@ -7,3 +7,4 @@ export * from "./run.js";
 export * from "./state.js";
 export * from "./workspace.js";
 export * from "./checkpoint.js";
+export * from "./recovery.js";
