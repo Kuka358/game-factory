@@ -3,6 +3,9 @@ import type {
     CheckpointRef
 } from "./providers.js";
 
+import type {
+    IterationScope
+} from "./contracts.js";
 
 export class MemoryCheckpointManager
     implements CheckpointManager
@@ -25,7 +28,10 @@ export class MemoryCheckpointManager
             string,
 
         iterationId:
-            string
+            string,
+
+        _scope:
+            IterationScope
     ): Promise<CheckpointRef> {
         this.sequence +=
             1;

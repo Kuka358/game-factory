@@ -18,10 +18,20 @@ describe(
                 const manager =
                     new MemoryCheckpointManager();
 
+                const scope = {
+                    allowedPaths: [
+                        "packages/autonomy/**"
+                    ],
+
+                    forbiddenPaths:
+                        []
+                };
+
                 const checkpoint =
                     await manager.create(
                         "run-001",
-                        "iteration-001"
+                        "iteration-001",
+                        scope
                     );
 
                 await manager.restore(

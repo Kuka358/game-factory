@@ -379,7 +379,8 @@ export class AutonomyEngine {
                     .checkpointManager
                     .create(
                         run.id,
-                        contract.id
+                        contract.id,
+                        contract.scope
                     );
 
             record.checkpointId =
@@ -921,13 +922,17 @@ export class AutonomyEngine {
             return;
         }
 
+        record.checkpointId =
+            undefined;
+
+        await this.persist(
+            run
+        );
+
         await manager.release({
             id:
                 checkpointId
         });
-
-        record.checkpointId =
-            undefined;
 
         await this.record(
             run,

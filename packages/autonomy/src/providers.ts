@@ -222,7 +222,10 @@ export interface CheckpointManager {
             string,
 
         iterationId:
-            string
+            string,
+
+        scope:
+            IterationScope
     ): Promise<CheckpointRef>;
 
     restore(
