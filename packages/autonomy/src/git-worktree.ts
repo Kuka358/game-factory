@@ -3,11 +3,15 @@ import {
 } from "node:child_process";
 
 import {
+    createHash,
     randomUUID
 } from "node:crypto";
 
 import {
-    mkdir
+    mkdir,
+    readFile,
+    rm,
+    writeFile
 } from "node:fs/promises";
 
 import {
@@ -52,6 +56,13 @@ export interface GitWorktreeRef {
 export interface GitWorktreeChanges {
     changedFiles:
         readonly string[];
+}
+
+export interface GitWorktreeSnapshot
+    extends GitWorktreeChanges
+{
+    digest:
+        string;
 }
 
 
@@ -192,68 +203,14 @@ export class GitWorktreeManager {
         worktree:
             GitWorktreeRef
     ): Promise<GitWorktreeChanges> {
-        this.assertManagedWorktree(
-            worktree
-        );
-
-        const currentHead =
-            (
-                await this.runGit(
-                    worktree.path,
-                    [
-                        "rev-parse",
-                        "HEAD"
-                    ]
-                )
-            ).trim();
-
-        if (
-            currentHead !==
-            worktree.headSha
-        ) {
-            throw new Error(
-                `Isolated worktree HEAD changed from ${worktree.headSha} to ${currentHead}`
+        const snapshot =
+            await this.snapshotChanges(
+                worktree
             );
-        }
-
-        const trackedRaw =
-            await this.runGit(
-                worktree.path,
-                [
-                    "diff",
-                    "--name-only",
-                    "-z",
-                    "--no-renames",
-                    "HEAD",
-                    "--"
-                ]
-            );
-
-        const untrackedRaw =
-            await this.runGit(
-                worktree.path,
-                [
-                    "ls-files",
-                    "--others",
-                    "--exclude-standard",
-                    "-z",
-                    "--"
-                ]
-            );
-
-        const changedFiles =
-            deduplicatePaths([
-                ...parseNullSeparatedPaths(
-                    trackedRaw
-                ),
-
-                ...parseNullSeparatedPaths(
-                    untrackedRaw
-                )
-            ]);
 
         return {
-            changedFiles
+            changedFiles:
+                snapshot.changedFiles
         };
     }
 
@@ -265,23 +222,174 @@ export class GitWorktreeManager {
         scope:
             IterationScope
     ): Promise<GitWorktreeChanges> {
-        const changes =
-            await this.collectChanges(
-                worktree
+        const snapshot =
+            await this.snapshotAllowedChanges(
+                worktree,
+                scope
             );
 
-        for (
-            const path of
-            changes.changedFiles
+        return {
+            changedFiles:
+                snapshot.changedFiles
+        };
+    }
+
+    async promote(
+        worktree:
+            GitWorktreeRef,
+
+        scope:
+            IterationScope,
+
+        expectedDigest:
+            string
+    ): Promise<GitWorktreeChanges> {
+        await this.assertRepositoryRoot();
+
+        this.assertManagedWorktree(
+            worktree
+        );
+
+        const mainHead =
+            (
+                await this.runGit(
+                    this.repositoryRoot,
+                    [
+                        "rev-parse",
+                        "HEAD"
+                    ]
+                )
+            ).trim();
+
+        if (
+            mainHead !==
+            worktree.headSha
         ) {
-            await this.workspaceGuard
-                .assertPathAllowed(
-                    path,
-                    scope
-                );
+            throw new Error(
+                `Cannot promote isolated worktree: repository HEAD changed from ${worktree.headSha} to ${mainHead}`
+            );
         }
 
-        return changes;
+        const snapshot =
+            await this.snapshotAllowedChanges(
+                worktree,
+                scope
+            );
+
+        if (
+            snapshot.digest !==
+            expectedDigest
+        ) {
+            throw new Error(
+                "Cannot promote isolated worktree: changeset changed after verification"
+            );
+        }
+
+        const mainChanges =
+            await this.collectChangesAt(
+                this.repositoryRoot
+            );
+
+        const dirtyScope =
+            mainChanges.changedFiles
+                .filter(
+                    path =>
+                        this.isPathAllowed(
+                            path,
+                            scope
+                        )
+                );
+
+        if (
+            dirtyScope.length >
+            0
+        ) {
+            throw new Error(
+                `Cannot promote isolated worktree: main iteration scope is dirty: ${dirtyScope.join(", ")}`
+            );
+        }
+
+        if (
+            snapshot.changedFiles.length ===
+            0
+        ) {
+            return {
+                changedFiles:
+                    []
+            };
+        }
+
+        /*
+        * This worktree has its own index, so staging here does not
+        * stage anything in the user's main working tree.
+        */
+        await this.runGit(
+            worktree.path,
+            [
+                "add",
+                "-A",
+                "--"
+            ]
+        );
+
+        const patch =
+            await this.runGit(
+                worktree.path,
+                [
+                    "diff",
+                    "--cached",
+                    "--binary",
+                    "--full-index",
+                    "HEAD",
+                    "--"
+                ]
+            );
+
+        const patchPath =
+            join(
+                this.worktreesDirectory,
+                `.promotion-${randomUUID()}.patch`
+            );
+
+        await writeFile(
+            patchPath,
+            patch,
+            "utf8"
+        );
+
+        try {
+            await this.runGit(
+                this.repositoryRoot,
+                [
+                    "apply",
+                    "--check",
+                    "--binary",
+                    patchPath
+                ]
+            );
+
+            await this.runGit(
+                this.repositoryRoot,
+                [
+                    "apply",
+                    "--binary",
+                    patchPath
+                ]
+            );
+        } finally {
+            await rm(
+                patchPath,
+                {
+                    force:
+                        true
+                }
+            );
+        }
+
+        return {
+            changedFiles:
+                snapshot.changedFiles
+        };
     }
 
 
@@ -292,6 +400,26 @@ export class GitWorktreeManager {
         this.assertManagedWorktree(
             worktree
         );
+
+        const registered =
+            await this.isRegisteredWorktree(
+                worktree.path
+            );
+
+        if (!registered) {
+            await rm(
+                worktree.path,
+                {
+                    recursive:
+                        true,
+
+                    force:
+                        true
+                }
+            );
+
+            return;
+        }
 
         await this.runGit(
             this.repositoryRoot,
@@ -395,6 +523,273 @@ export class GitWorktreeManager {
                 }
             );
         }
+    }
+
+    async snapshotAllowedChanges(
+        worktree:
+            GitWorktreeRef,
+
+        scope:
+            IterationScope
+    ): Promise<GitWorktreeSnapshot> {
+        const snapshot =
+            await this.snapshotChanges(
+                worktree
+            );
+
+        for (
+            const path of
+            snapshot.changedFiles
+        ) {
+            await this.workspaceGuard
+                .assertPathAllowed(
+                    path,
+                    scope
+                );
+        }
+
+        return snapshot;
+    }
+
+    async snapshotChanges(
+        worktree:
+            GitWorktreeRef
+    ): Promise<GitWorktreeSnapshot> {
+        this.assertManagedWorktree(
+            worktree
+        );
+
+        const currentHead =
+            (
+                await this.runGit(
+                    worktree.path,
+                    [
+                        "rev-parse",
+                        "HEAD"
+                    ]
+                )
+            ).trim();
+
+        if (
+            currentHead !==
+            worktree.headSha
+        ) {
+            throw new Error(
+                `Isolated worktree HEAD changed from ${worktree.headSha} to ${currentHead}`
+            );
+        }
+
+        const trackedRaw =
+            await this.runGit(
+                worktree.path,
+                [
+                    "diff",
+                    "--name-only",
+                    "-z",
+                    "--no-renames",
+                    "HEAD",
+                    "--"
+                ]
+            );
+
+        const untrackedRaw =
+            await this.runGit(
+                worktree.path,
+                [
+                    "ls-files",
+                    "--others",
+                    "--exclude-standard",
+                    "-z",
+                    "--"
+                ]
+            );
+
+        const tracked =
+            parseNullSeparatedPaths(
+                trackedRaw
+            );
+
+        const untracked =
+            parseNullSeparatedPaths(
+                untrackedRaw
+            );
+
+        const changedFiles =
+            deduplicatePaths([
+                ...tracked,
+                ...untracked
+            ]);
+
+        const trackedPatch =
+            await this.runGit(
+                worktree.path,
+                [
+                    "diff",
+                    "--binary",
+                    "--full-index",
+                    "HEAD",
+                    "--"
+                ]
+            );
+
+        const hash =
+            createHash(
+                "sha256"
+            );
+
+        hash.update(
+            "tracked\0"
+        );
+
+        hash.update(
+            trackedPatch
+        );
+
+        for (
+            const path of
+            [...untracked].sort()
+        ) {
+            const absolute =
+                resolve(
+                    worktree.path,
+                    path
+                );
+
+            assertInsideDirectory(
+                worktree.path,
+                absolute
+            );
+
+            hash.update(
+                "\0untracked\0"
+            );
+
+            hash.update(
+                path
+            );
+
+            hash.update(
+                "\0"
+            );
+
+            hash.update(
+                await readFile(
+                    absolute
+                )
+            );
+        }
+
+        return {
+            changedFiles,
+
+            digest:
+                hash.digest(
+                    "hex"
+                )
+        };
+    }
+
+    private async collectChangesAt(
+        cwd:
+            string
+    ): Promise<GitWorktreeChanges> {
+        const trackedRaw =
+            await this.runGit(
+                cwd,
+                [
+                    "diff",
+                    "--name-only",
+                    "-z",
+                    "HEAD",
+                    "--"
+                ]
+            );
+
+        const untrackedRaw =
+            await this.runGit(
+                cwd,
+                [
+                    "ls-files",
+                    "--others",
+                    "--exclude-standard",
+                    "-z",
+                    "--"
+                ]
+            );
+
+        return {
+            changedFiles:
+                deduplicatePaths([
+                    ...parseNullSeparatedPaths(
+                        trackedRaw
+                    ),
+
+                    ...parseNullSeparatedPaths(
+                        untrackedRaw
+                    )
+                ])
+        };
+    }
+
+
+    private isPathAllowed(
+        path:
+            string,
+
+        scope:
+            IterationScope
+    ): boolean {
+        try {
+            this.workspaceGuard
+                .assertPathAllowed(
+                    path,
+                    scope
+                );
+
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    private async isRegisteredWorktree(
+        path:
+            string
+    ): Promise<boolean> {
+        const raw =
+            await this.runGit(
+                this.repositoryRoot,
+                [
+                    "worktree",
+                    "list",
+                    "--porcelain"
+                ]
+            );
+
+        const expected =
+            resolve(
+                path
+            );
+
+        return raw
+            .split(
+                /\r?\n/
+            )
+            .filter(
+                line =>
+                    line.startsWith(
+                        "worktree "
+                    )
+            )
+            .some(
+                line =>
+                    samePath(
+                        line.slice(
+                            "worktree ".length
+                        ),
+                        expected
+                    )
+            );
     }
 }
 

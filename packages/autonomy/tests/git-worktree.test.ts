@@ -265,6 +265,499 @@ describe(
 
 
         it(
+            "promotes the verified changeset while preserving dirty files outside scope",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    await writeFile(
+                        join(
+                            repository,
+                            "outside.txt"
+                        ),
+                        "dirty outside\n",
+                        "utf8"
+                    );
+
+                    const manager =
+                        new GitWorktreeManager({
+                            repositoryRoot:
+                                repository
+                        });
+
+                    const worktree =
+                        await manager.create(
+                            "promotion-run",
+                            "iteration",
+                            1
+                        );
+
+                    await writeFile(
+                        join(
+                            worktree.path,
+                            "src",
+                            "main.txt"
+                        ),
+                        "promoted\n",
+                        "utf8"
+                    );
+
+                    await unlink(
+                        join(
+                            worktree.path,
+                            "src",
+                            "remove.txt"
+                        )
+                    );
+
+                    await writeFile(
+                        join(
+                            worktree.path,
+                            "src",
+                            "new.txt"
+                        ),
+                        "new file\n",
+                        "utf8"
+                    );
+
+                    const snapshot =
+                        await manager
+                            .snapshotAllowedChanges(
+                                worktree,
+                                {
+                                    allowedPaths: [
+                                        "src/**"
+                                    ],
+
+                                    forbiddenPaths:
+                                        []
+                                }
+                            );
+
+                    await manager.promote(
+                        worktree,
+                        {
+                            allowedPaths: [
+                                "src/**"
+                            ],
+
+                            forbiddenPaths:
+                                []
+                        },
+                        snapshot.digest
+                    );
+
+                    expect(
+                        await readFile(
+                            join(
+                                repository,
+                                "src",
+                                "main.txt"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        "promoted\n"
+                    );
+
+                    expect(
+                        await readFile(
+                            join(
+                                repository,
+                                "src",
+                                "new.txt"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        "new file\n"
+                    );
+
+                    await expect(
+                        access(
+                            join(
+                                repository,
+                                "src",
+                                "remove.txt"
+                            )
+                        )
+                    ).rejects.toMatchObject({
+                        code:
+                            "ENOENT"
+                    });
+
+                    expect(
+                        await readFile(
+                            join(
+                                repository,
+                                "outside.txt"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        "dirty outside\n"
+                    );
+
+                    await manager.remove(
+                        worktree
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
+            "refuses promotion when the verified changeset changed afterwards",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    const manager =
+                        new GitWorktreeManager({
+                            repositoryRoot:
+                                repository
+                        });
+
+                    const worktree =
+                        await manager.create(
+                            "digest-run",
+                            "iteration",
+                            1
+                        );
+
+                    await writeFile(
+                        join(
+                            worktree.path,
+                            "src",
+                            "main.txt"
+                        ),
+                        "verified version\n",
+                        "utf8"
+                    );
+
+                    const snapshot =
+                        await manager
+                            .snapshotAllowedChanges(
+                                worktree,
+                                {
+                                    allowedPaths: [
+                                        "src/**"
+                                    ],
+
+                                    forbiddenPaths:
+                                        []
+                                }
+                            );
+
+                    await writeFile(
+                        join(
+                            worktree.path,
+                            "src",
+                            "main.txt"
+                        ),
+                        "changed after verify\n",
+                        "utf8"
+                    );
+
+                    await expect(
+                        manager.promote(
+                            worktree,
+                            {
+                                allowedPaths: [
+                                    "src/**"
+                                ],
+
+                                forbiddenPaths:
+                                    []
+                            },
+                            snapshot.digest
+                        )
+                    ).rejects.toThrow(
+                        "changeset changed after verification"
+                    );
+
+                    expect(
+                        await readFile(
+                            join(
+                                repository,
+                                "src",
+                                "main.txt"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        "original\n"
+                    );
+
+                    await manager.remove(
+                        worktree
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
+            "refuses promotion when the main iteration scope became dirty",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    const manager =
+                        new GitWorktreeManager({
+                            repositoryRoot:
+                                repository
+                        });
+
+                    const worktree =
+                        await manager.create(
+                            "dirty-main-run",
+                            "iteration",
+                            1
+                        );
+
+                    await writeFile(
+                        join(
+                            worktree.path,
+                            "src",
+                            "main.txt"
+                        ),
+                        "isolated\n",
+                        "utf8"
+                    );
+
+                    const snapshot =
+                        await manager
+                            .snapshotAllowedChanges(
+                                worktree,
+                                {
+                                    allowedPaths: [
+                                        "src/**"
+                                    ],
+
+                                    forbiddenPaths:
+                                        []
+                                }
+                            );
+
+                    await writeFile(
+                        join(
+                            repository,
+                            "src",
+                            "main.txt"
+                        ),
+                        "user change\n",
+                        "utf8"
+                    );
+
+                    await expect(
+                        manager.promote(
+                            worktree,
+                            {
+                                allowedPaths: [
+                                    "src/**"
+                                ],
+
+                                forbiddenPaths:
+                                    []
+                            },
+                            snapshot.digest
+                        )
+                    ).rejects.toThrow(
+                        "main iteration scope is dirty"
+                    );
+
+                    await manager.remove(
+                        worktree
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
+            "refuses promotion when main HEAD changed",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    const manager =
+                        new GitWorktreeManager({
+                            repositoryRoot:
+                                repository
+                        });
+
+                    const worktree =
+                        await manager.create(
+                            "head-run",
+                            "iteration",
+                            1
+                        );
+
+                    await writeFile(
+                        join(
+                            worktree.path,
+                            "src",
+                            "main.txt"
+                        ),
+                        "isolated\n",
+                        "utf8"
+                    );
+
+                    const snapshot =
+                        await manager
+                            .snapshotAllowedChanges(
+                                worktree,
+                                {
+                                    allowedPaths: [
+                                        "src/**"
+                                    ],
+
+                                    forbiddenPaths:
+                                        []
+                                }
+                            );
+
+                    await writeFile(
+                        join(
+                            repository,
+                            "outside.txt"
+                        ),
+                        "new committed value\n",
+                        "utf8"
+                    );
+
+                    await runGit(
+                        repository,
+                        [
+                            "add",
+                            "outside.txt"
+                        ]
+                    );
+
+                    await runGit(
+                        repository,
+                        [
+                            "commit",
+                            "-m",
+                            "advance head"
+                        ]
+                    );
+
+                    await expect(
+                        manager.promote(
+                            worktree,
+                            {
+                                allowedPaths: [
+                                    "src/**"
+                                ],
+
+                                forbiddenPaths:
+                                    []
+                            },
+                            snapshot.digest
+                        )
+                    ).rejects.toThrow(
+                        "repository HEAD changed"
+                    );
+
+                    await manager.remove(
+                        worktree
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
+            "allows isolated worktree removal to be retried",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    const manager =
+                        new GitWorktreeManager({
+                            repositoryRoot:
+                                repository
+                        });
+
+                    const worktree =
+                        await manager.create(
+                            "remove-retry",
+                            "iteration",
+                            1
+                        );
+
+                    await manager.remove(
+                        worktree
+                    );
+
+                    await expect(
+                        manager.remove(
+                            worktree
+                        )
+                    ).resolves.toBeUndefined();
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
             "removes only the isolated worktree",
             async () => {
                 const repository =
