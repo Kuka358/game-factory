@@ -33,6 +33,8 @@ export type AutonomyEventType =
     | "run_blocked"
     | "worker_workspace_prepared"
     | "worker_workspace_settled"
+    | "iteration_acceptance_pending"
+    | "iteration_acceptance_accepted"
     | "run_failed";
 
 

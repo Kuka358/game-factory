@@ -45,6 +45,40 @@ export interface WorkerWorkspaceRef {
         string;
 }
 
+export type IterationAcceptanceStatus =
+    | "pending"
+    | "accepted";
+
+
+export interface IterationAcceptance {
+    id:
+        string;
+
+    status:
+        IterationAcceptanceStatus;
+
+    attempt:
+        number;
+
+    baseRevision:
+        string;
+
+    digest:
+        string;
+
+    changedFiles:
+        readonly string[];
+
+    createdAt:
+        string;
+
+    acceptedRevision?:
+        string;
+
+    acceptedAt?:
+        string;
+}
+
 export interface IterationAttempt {
     attempt:
         number;
@@ -77,6 +111,9 @@ export interface IterationRecord {
 
     workspace?:
         WorkerWorkspaceRef;
+
+    acceptance?:
+        IterationAcceptance;
 }
 
 export interface AutonomousRun {

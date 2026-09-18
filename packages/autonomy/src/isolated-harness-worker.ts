@@ -12,12 +12,17 @@ import type {
     WorkerInput,
     WorkerPreparationInput,
     WorkerResult,
-    WorkerSettlementInput
+    WorkerSettlementInput,
+    WorkerSettlementResult
 } from "./providers.js";
 
 import type {
     WorkerWorkspaceRef
 } from "./state.js";
+
+import {
+    VerifiedCommitManager
+} from "./verified-commit.js";
 
 
 export interface IsolatedHarnessCodingWorkerOptions {
@@ -38,6 +43,9 @@ export class IsolatedHarnessCodingWorker
     private readonly worktreeManager:
         GitWorktreeManager;
 
+    private readonly commitManager:
+        VerifiedCommitManager;
+
 
     constructor(
         private readonly options:
@@ -50,6 +58,12 @@ export class IsolatedHarnessCodingWorker
 
                 worktreesDirectory:
                     options.worktreesDirectory
+            });
+
+        this.commitManager =
+            new VerifiedCommitManager({
+                repositoryRoot:
+                    options.repositoryRoot
             });
     }
 
@@ -164,7 +178,7 @@ export class IsolatedHarnessCodingWorker
     async settle(
         input:
             WorkerSettlementInput
-    ): Promise<void> {
+    ): Promise<WorkerSettlementResult | void> {
         const worktree =
             toGitWorktreeRef(
                 input.workspace
@@ -182,28 +196,130 @@ export class IsolatedHarnessCodingWorker
             return;
         }
 
+        const acceptanceId =
+            input.acceptanceId;
+
+        if (!acceptanceId) {
+            throw new Error(
+                "Cannot accept isolated workspace without an acceptance id"
+            );
+        }
+
+        const workerResult =
+            input.workerResult;
+
         const digest =
-            input.workerResult
+            workerResult
                 ?.changeSet
                 ?.digest;
 
-        if (!digest) {
+        if (
+            !workerResult ||
+            !digest
+        ) {
             throw new Error(
                 "Cannot accept isolated workspace without a verified changeset digest"
             );
         }
 
-        await this.worktreeManager
-            .promote(
-                worktree,
-                input.contract.scope,
-                digest
-            );
+        const commitInput = {
+            baseRevision:
+                input.workspace
+                    .baseRevision,
 
+            changedFiles:
+                workerResult
+                    .changedFiles,
+
+            message:
+                `autonomy: ${input.contract.id}`,
+
+            acceptanceId,
+
+            digest
+        };
+
+        /*
+        * No-op verified iterations do not need promotion,
+        * but VerifiedCommitManager still validates HEAD.
+        */
+        if (
+            workerResult
+                .changedFiles
+                .length ===
+            0
+        ) {
+            const result =
+                await this.commitManager
+                    .commit(
+                        commitInput
+                    );
+
+            await this.worktreeManager
+                .remove(
+                    worktree
+                );
+
+            return {
+                acceptedRevision:
+                    result.revision
+            };
+        }
+
+        /*
+        * Crash may have happened after commit but before run state
+        * was persisted or the worktree was removed.
+        */
+        const alreadyAccepted =
+            await this.commitManager
+                .findAcceptedRevision({
+                    baseRevision:
+                        input.workspace
+                            .baseRevision,
+
+                    acceptanceId,
+
+                    digest
+                });
+
+        let acceptedRevision:
+            string;
+
+        if (alreadyAccepted) {
+            acceptedRevision =
+                alreadyAccepted;
+        } else {
+            /*
+            * Promotion itself is replay-safe.
+            */
+            await this.worktreeManager
+                .promote(
+                    worktree,
+                    input.contract.scope,
+                    digest
+                );
+
+            const result =
+                await this.commitManager
+                    .commit(
+                        commitInput
+                    );
+
+            acceptedRevision =
+                result.revision;
+        }
+
+        /*
+        * Removal is replay-safe too.
+        */
         await this.worktreeManager
             .remove(
                 worktree
             );
+
+        return {
+            acceptedRevision
+        };
     }
 }
 

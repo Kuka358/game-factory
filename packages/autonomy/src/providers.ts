@@ -60,6 +60,10 @@ export type WorkerSettlementOutcome =
     | "accept"
     | "discard";
 
+export interface WorkerSettlementResult {
+    acceptedRevision?:
+        string;
+}
 
 export interface WorkerSettlementInput {
     run:
@@ -76,6 +80,9 @@ export interface WorkerSettlementInput {
 
     workerResult?:
         WorkerResult;
+
+    acceptanceId?:
+        string;
 }
 
 export interface WorkerInput {
@@ -134,7 +141,7 @@ export interface CodingWorker {
     settle?(
         input:
             WorkerSettlementInput
-    ): Promise<void>;
+    ): Promise<WorkerSettlementResult | void>;
 }
 
 

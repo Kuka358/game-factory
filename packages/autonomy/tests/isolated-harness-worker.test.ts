@@ -499,17 +499,61 @@ describe(
                             ?.digest
                     ).toBeDefined();
 
-                    await worker.settle({
-                        run,
-                        contract,
-                        workspace,
+                    const firstSettlement =
+                        await worker.settle({
+                            run,
+                            contract,
+                            workspace,
 
-                        outcome:
-                            "accept",
+                            outcome:
+                                "accept",
 
-                        workerResult:
-                            result
-                    });
+                            workerResult:
+                                result,
+
+                            acceptanceId:
+                                "accept-run-001"
+                        });
+
+                    expect(
+                        firstSettlement
+                            ?.acceptedRevision
+                    ).toBeDefined();
+
+                    /*
+                    * Имитируем crash:
+                    *
+                    * commit уже создан,
+                    * worktree уже удалён,
+                    * но run.json теоретически мог ещё остаться
+                    * со статусом pending.
+                    *
+                    * Поэтому тот же accept должен быть безопасен
+                    * при повторном вызове.
+                    */
+                    const replaySettlement =
+                        await worker.settle({
+                            run,
+                            contract,
+                            workspace,
+
+                            outcome:
+                                "accept",
+
+                            workerResult:
+                                result,
+
+                            acceptanceId:
+                                "accept-run-001"
+                        });
+
+                    expect(
+                        replaySettlement
+                            ?.acceptedRevision
+                    ).toBe(
+                        firstSettlement
+                            ?.acceptedRevision
+                    );
 
                     expect(
                         await readFile(

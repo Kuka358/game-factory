@@ -28,6 +28,17 @@ interface RepositoryChanges {
         readonly string[];
 }
 
+export interface VerifiedAcceptanceLookup {
+    baseRevision:
+        string;
+
+    acceptanceId:
+        string;
+
+    digest:
+        string;
+}
+
 
 export interface VerifiedCommitManagerOptions {
     repositoryRoot:
@@ -134,7 +145,16 @@ export class VerifiedCommitManager {
                 input.digest &&
                 await this.matchesAcceptedCommit(
                     currentHead,
-                    input
+                    {
+                        baseRevision:
+                            input.baseRevision,
+
+                        acceptanceId:
+                            input.acceptanceId,
+
+                        digest:
+                            input.digest
+                    }
                 )
             ) {
                 return {
@@ -285,6 +305,43 @@ export class VerifiedCommitManager {
         };
     }
 
+    async findAcceptedRevision(
+        input:
+            VerifiedAcceptanceLookup
+    ): Promise<string | null> {
+        await this.assertRepositoryRoot();
+
+        assertSingleLine(
+            input.acceptanceId,
+            "Verified commit acceptanceId"
+        );
+
+        assertSingleLine(
+            input.digest,
+            "Verified commit digest"
+        );
+
+        const currentHead =
+            await this.getHead();
+
+        if (
+            currentHead ===
+            input.baseRevision
+        ) {
+            return null;
+        }
+
+        const matches =
+            await this.matchesAcceptedCommit(
+                currentHead,
+                input
+            );
+
+        return matches
+            ? currentHead
+            : null;
+    }
+
 
     private async collectChanges():
         Promise<RepositoryChanges>
@@ -409,7 +466,7 @@ export class VerifiedCommitManager {
             string,
 
         input:
-            VerifiedCommitInput
+            VerifiedAcceptanceLookup
     ): Promise<boolean> {
         if (
             !input.acceptanceId ||

@@ -1,3 +1,7 @@
+import {
+    randomUUID
+} from "node:crypto";
+
 import type {
     IterationContract
 } from "./contracts.js";
@@ -543,6 +547,23 @@ export class AutonomyEngine {
                                 record.workspace
                         });
 
+                attemptRecord.verification =
+                    verification;
+
+                attemptRecord.completedAt =
+                    this.now();
+
+                if (
+                    verification.passed
+                ) {
+                    this.prepareAcceptanceState(
+                        run,
+                        record,
+                        attempt,
+                        workerResult
+                    );
+                }
+
                 await this.record(
                     run,
                     {
@@ -567,33 +588,83 @@ export class AutonomyEngine {
                     }
                 );
 
-                attemptRecord.verification =
-                    verification;
+                if (
+                    record.acceptance?.status ===
+                    "pending"
+                ) {
+                    await this.record(
+                        run,
+                        {
+                            runId:
+                                run.id,
 
-                attemptRecord.completedAt =
-                    this.now();
+                            type:
+                                "iteration_acceptance_pending",
+
+                            timestamp:
+                                this.now(),
+
+                            iterationId:
+                                contract.id,
+
+                            attempt,
+
+                            details: {
+                                acceptanceId:
+                                    record.acceptance.id,
+
+                                digest:
+                                    record.acceptance.digest
+                            }
+                        }
+                    );
+                }
 
                 if (
                     verification.passed
                 ) {
-                    await this.settleWorkerWorkspace(
+                    await this.acceptWorkerWorkspace(
                         run,
                         record,
-                        "accept",
                         workerResult
                     );
 
-                    record.completed =
-                        true;
+                    /*
+                    * Transactional acceptance changes HEAD.
+                    * Release its old checkpoint before marking the
+                    * iteration complete, so recovery can finish this
+                    * transaction if release itself is interrupted.
+                    */
+                    if (
+                        record.acceptance
+                    ) {
+                        await this.releaseCheckpoint(
+                            run,
+                            record
+                        );
 
-                    await this.persist(
-                        run
-                    );
+                        record.completed =
+                            true;
 
-                    await this.releaseCheckpoint(
-                        run,
-                        record
-                    );
+                        await this.persist(
+                            run
+                        );
+                    } else {
+                        /*
+                        * Preserve legacy worker behaviour.
+                        */
+                        record.completed =
+                            true;
+
+                        await this.persist(
+                            run
+                        );
+
+                        await this.releaseCheckpoint(
+                            run,
+                            record
+                        );
+                    }
 
                     await this.record(
                         run,
@@ -905,6 +976,24 @@ export class AutonomyEngine {
 
                 return "stopped";
             } catch (error) {
+                if (
+                    record.acceptance
+                ) {
+                    /*
+                    * Never roll back a transaction once durable acceptance has
+                    * started. Promotion/commit may already have happened.
+                    * Recovery will replay acceptance safely.
+                    */
+                    run.status =
+                        "committing";
+
+                    await this.persist(
+                        run
+                    );
+
+                    throw error;
+                }
+
                 const failureMessages: string[] = [
                     getErrorMessage(
                         error
@@ -1287,6 +1376,209 @@ export class AutonomyEngine {
                         workspace.id,
 
                     outcome
+                }
+            }
+        );
+    }
+
+    private prepareAcceptanceState(
+        run:
+            AutonomousRun,
+
+        record:
+            IterationRecord,
+
+        attempt:
+            number,
+
+        workerResult:
+            WorkerResult
+    ): void {
+        if (
+            record.acceptance
+        ) {
+            return;
+        }
+
+        const workspace =
+            record.workspace;
+
+        const digest =
+            workerResult
+                .changeSet
+                ?.digest;
+
+        if (
+            !workspace ||
+            !digest
+        ) {
+            return;
+        }
+
+        record.acceptance = {
+            id:
+                randomUUID(),
+
+            status:
+                "pending",
+
+            attempt,
+
+            baseRevision:
+                workspace.baseRevision,
+
+            digest,
+
+            changedFiles: [
+                ...workerResult.changedFiles
+            ],
+
+            createdAt:
+                this.now()
+        };
+
+        run.status =
+            "committing";
+    }
+
+    private async acceptWorkerWorkspace(
+        run:
+            AutonomousRun,
+
+        record:
+            IterationRecord,
+
+        workerResult:
+            WorkerResult
+    ): Promise<void> {
+        const acceptance =
+            record.acceptance;
+
+        if (!acceptance) {
+            await this.settleWorkerWorkspace(
+                run,
+                record,
+                "accept",
+                workerResult
+            );
+
+            return;
+        }
+
+        const workspace =
+            record.workspace;
+
+        if (!workspace) {
+            throw new Error(
+                "Pending iteration acceptance requires an active worker workspace"
+            );
+        }
+
+        const settle =
+            this.dependencies
+                .worker
+                .settle;
+
+        if (!settle) {
+            throw new Error(
+                "Pending iteration acceptance requires worker settlement support"
+            );
+        }
+
+        const result =
+            await settle({
+                run,
+
+                contract:
+                    record.contract,
+
+                workspace,
+
+                outcome:
+                    "accept",
+
+                workerResult,
+
+                acceptanceId:
+                    acceptance.id
+            });
+
+        const acceptedRevision =
+            result?.acceptedRevision;
+
+        if (!acceptedRevision) {
+            throw new Error(
+                "Transactional worker did not return an accepted revision"
+            );
+        }
+
+        acceptance.status =
+            "accepted";
+
+        acceptance.acceptedRevision =
+            acceptedRevision;
+
+        acceptance.acceptedAt =
+            this.now();
+
+        /*
+        * Persist accepted revision before clearing the workspace ref.
+        */
+        await this.persist(
+            run
+        );
+
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    "iteration_acceptance_accepted",
+
+                timestamp:
+                    this.now(),
+
+                iterationId:
+                    record.contract.id,
+
+                details: {
+                    acceptanceId:
+                        acceptance.id,
+
+                    acceptedRevision
+                }
+            }
+        );
+
+        delete record.workspace;
+
+        await this.persist(
+            run
+        );
+
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    "worker_workspace_settled",
+
+                timestamp:
+                    this.now(),
+
+                iterationId:
+                    record.contract.id,
+
+                details: {
+                    workspaceId:
+                        workspace.id,
+
+                    outcome:
+                        "accept"
                 }
             }
         );
