@@ -98,6 +98,11 @@ export interface WorkerInput {
         WorkerWorkspaceRef;
 }
 
+export interface WorkerChangeSet {
+    digest:
+        string;
+}
+
 
 export interface WorkerResult {
     summary:
@@ -105,6 +110,9 @@ export interface WorkerResult {
 
     changedFiles:
         readonly string[];
+
+    changeSet?:
+        WorkerChangeSet;
 }
 
 
