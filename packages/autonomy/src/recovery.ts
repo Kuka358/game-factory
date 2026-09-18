@@ -7,7 +7,8 @@ import type {
 } from "./persistence.js";
 
 import type {
-    CheckpointManager
+    CheckpointManager,
+    CodingWorker
 } from "./providers.js";
 
 import type {
@@ -51,6 +52,9 @@ export interface RecoveryManagerDependencies {
 
     eventJournal?:
         EventJournal;
+
+    worker?:
+        CodingWorker;
 
     now?:
         () => string;
@@ -169,6 +173,77 @@ export class RecoveryManager {
                 throw new Error(
                     `Cannot safely recover run ${run.id}: incomplete iteration is missing`
                 );
+            }
+
+            if (
+                record.workspace
+            ) {
+                const worker =
+                    this.dependencies
+                        .worker;
+
+                if (
+                    !worker?.settle
+                ) {
+                    throw new Error(
+                        `Cannot safely recover run ${run.id}: active worker workspace requires worker settlement support`
+                    );
+                }
+
+                const workspace =
+                    record.workspace;
+
+                await worker.settle({
+                    run,
+
+                    contract:
+                        record.contract,
+
+                    workspace,
+
+                    outcome:
+                        "discard"
+                });
+
+                delete record.workspace;
+
+                run.updatedAt =
+                    this.now();
+
+                /*
+                * Persist immediately after successful disposal.
+                * If recovery crashes afterwards, it won't lose workspace state.
+                */
+                await this.dependencies
+                    .runStore
+                    .save(
+                        run
+                    );
+
+                await this.appendEvent({
+                    runId:
+                        run.id,
+
+                    type:
+                        "worker_workspace_settled",
+
+                    timestamp:
+                        this.now(),
+
+                    iterationId:
+                        record.contract.id,
+
+                    details: {
+                        workspaceId:
+                            workspace.id,
+
+                        outcome:
+                            "discard",
+
+                        recovery:
+                            true
+                    }
+                });
             }
 
             recoveredIterationId =

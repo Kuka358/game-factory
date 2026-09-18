@@ -5,7 +5,8 @@ import type {
 
 import type {
     AutonomousRun,
-    VerificationReport
+    VerificationReport,
+    WorkerWorkspaceRef
 } from "./state.js";
 
 
@@ -46,6 +47,36 @@ export interface Planner {
     ): Promise<PlanningDecision>;
 }
 
+export interface WorkerPreparationInput {
+    run:
+        Readonly<AutonomousRun>;
+
+    contract:
+        IterationContract;
+}
+
+
+export type WorkerSettlementOutcome =
+    | "accept"
+    | "discard";
+
+
+export interface WorkerSettlementInput {
+    run:
+        Readonly<AutonomousRun>;
+
+    contract:
+        IterationContract;
+
+    workspace:
+        WorkerWorkspaceRef;
+
+    outcome:
+        WorkerSettlementOutcome;
+
+    workerResult?:
+        WorkerResult;
+}
 
 export interface WorkerInput {
     run:
@@ -62,6 +93,9 @@ export interface WorkerInput {
 
     repairInstructions?:
         readonly string[];
+
+    workspace?:
+        WorkerWorkspaceRef;
 }
 
 
@@ -75,10 +109,24 @@ export interface WorkerResult {
 
 
 export interface CodingWorker {
+    prepare?(
+        input:
+            WorkerPreparationInput
+    ): Promise<WorkerWorkspaceRef | undefined>;
+
     execute(
         input:
             WorkerInput
     ): Promise<WorkerResult>;
+
+    /**
+     * Implementations using a persistent workspace must make
+     * settlement safe to retry after process interruption.
+     */
+    settle?(
+        input:
+            WorkerSettlementInput
+    ): Promise<void>;
 }
 
 
@@ -94,6 +142,9 @@ export interface VerificationInput {
 
     workerResult:
         WorkerResult;
+
+    workspace?:
+        WorkerWorkspaceRef;
 }
 
 

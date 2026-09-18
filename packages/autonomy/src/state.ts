@@ -34,6 +34,17 @@ export interface VerificationReport {
         readonly VerificationCheckResult[];
 }
 
+export interface WorkerWorkspaceRef {
+    id:
+        string;
+
+    root:
+        string;
+
+    baseRevision:
+        string;
+}
+
 export interface IterationAttempt {
     attempt:
         number;
@@ -63,6 +74,9 @@ export interface IterationRecord {
 
     checkpointId?:
         string;
+
+    workspace?:
+        WorkerWorkspaceRef;
 }
 
 export interface AutonomousRun {

@@ -7,7 +7,8 @@ import type {
     CodingWorker,
     FailureAdvisor,
     Planner,
-    Verifier
+    Verifier,
+    WorkerResult
 } from "./providers.js";
 
 import type {
@@ -310,6 +311,10 @@ export class AutonomyEngine {
                     this.dependencies
                         .eventJournal,
 
+                worker:
+                    this.dependencies
+                        .worker,
+
                 now:
                     this.now
             });
@@ -465,6 +470,11 @@ export class AutonomyEngine {
             );
 
             try {
+                await this.prepareWorkerWorkspace(
+                    run,
+                    record
+                );
+
                 const workerResult =
                     await this.dependencies
                         .worker
@@ -477,7 +487,10 @@ export class AutonomyEngine {
 
                             previousVerification,
 
-                            repairInstructions
+                            repairInstructions,
+
+                            workspace:
+                                record.workspace
                         });
 
                 await this.record(
@@ -524,7 +537,10 @@ export class AutonomyEngine {
 
                             attempt,
 
-                            workerResult
+                            workerResult,
+
+                            workspace:
+                                record.workspace
                         });
 
                 await this.record(
@@ -560,6 +576,13 @@ export class AutonomyEngine {
                 if (
                     verification.passed
                 ) {
+                    await this.settleWorkerWorkspace(
+                        run,
+                        record,
+                        "accept",
+                        workerResult
+                    );
+
                     record.completed =
                         true;
 
@@ -660,6 +683,13 @@ export class AutonomyEngine {
                         contract.escalation
                             .maxRepairRounds
                     ) {
+                        await this.settleWorkerWorkspace(
+                            run,
+                            record,
+                            "discard",
+                            workerResult
+                        );
+
                         await this.restoreCheckpoint(
                             run,
                             record
@@ -721,6 +751,13 @@ export class AutonomyEngine {
                     escalation.type ===
                     "abort"
                 ) {
+                    await this.settleWorkerWorkspace(
+                        run,
+                        record,
+                        "discard",
+                        workerResult
+                    );
+
                     await this.restoreCheckpoint(
                         run,
                         record
@@ -762,6 +799,13 @@ export class AutonomyEngine {
                     escalation.type ===
                     "architecture_required"
                 ) {
+                    await this.settleWorkerWorkspace(
+                        run,
+                        record,
+                        "discard",
+                        workerResult
+                    );
+
                     await this.restoreCheckpoint(
                         run,
                         record
@@ -803,6 +847,13 @@ export class AutonomyEngine {
                     escalation.type ===
                     "replan"
                 ) {
+                    await this.settleWorkerWorkspace(
+                        run,
+                        record,
+                        "discard",
+                        workerResult
+                    );
+
                     await this.restoreCheckpoint(
                         run,
                         record
@@ -854,18 +905,46 @@ export class AutonomyEngine {
 
                 return "stopped";
             } catch (error) {
+                const failureMessages: string[] = [
+                    getErrorMessage(
+                        error
+                    )
+                ];
+
+                try {
+                    await this.settleWorkerWorkspace(
+                        run,
+                        record,
+                        "discard"
+                    );
+                } catch (cleanupError) {
+                    failureMessages.push(
+                        `Worker workspace cleanup failed: ${getErrorMessage(
+                            cleanupError
+                        )}`
+                    );
+                }
+
+                try {
+                    await this.restoreCheckpoint(
+                        run,
+                        record
+                    );
+                } catch (restoreError) {
+                    failureMessages.push(
+                        `Checkpoint restore failed: ${getErrorMessage(
+                            restoreError
+                        )}`
+                    );
+                }
+
                 attemptRecord.error =
-                    error instanceof Error
-                        ? error.message
-                        : String(error);
+                    failureMessages.join(
+                        "; "
+                    );
 
                 attemptRecord.completedAt =
                     this.now();
-
-                await this.restoreCheckpoint(
-                    run,
-                    record
-                );
 
                 run.status =
                     "failed";
@@ -1052,4 +1131,176 @@ export class AutonomyEngine {
             run
         );
     }
+
+    private async prepareWorkerWorkspace(
+        run:
+            AutonomousRun,
+
+        record:
+            IterationRecord
+    ): Promise<void> {
+        if (
+            record.workspace
+        ) {
+            return;
+        }
+
+        const worker =
+            this.dependencies
+                .worker;
+
+        if (
+            !worker.prepare
+        ) {
+            return;
+        }
+
+        if (
+            !worker.settle
+        ) {
+            throw new Error(
+                "Coding worker with prepare() must also implement settle()"
+            );
+        }
+
+        const workspace =
+            await worker.prepare({
+                run,
+
+                contract:
+                    record.contract
+            });
+
+        if (!workspace) {
+            return;
+        }
+
+        record.workspace =
+            workspace;
+
+        /*
+        * Persist before doing any coding in the workspace.
+        * Recovery must know that the workspace exists.
+        */
+        await this.persist(
+            run
+        );
+
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    "worker_workspace_prepared",
+
+                timestamp:
+                    this.now(),
+
+                iterationId:
+                    record.contract.id,
+
+                details: {
+                    workspaceId:
+                        workspace.id,
+
+                    baseRevision:
+                        workspace.baseRevision
+                }
+            }
+        );
+    }
+
+
+    private async settleWorkerWorkspace(
+        run:
+            AutonomousRun,
+
+        record:
+            IterationRecord,
+
+        outcome:
+            "accept" | "discard",
+
+        workerResult?:
+            WorkerResult
+    ): Promise<void> {
+        const workspace =
+            record.workspace;
+
+        if (!workspace) {
+            return;
+        }
+
+        const settle =
+            this.dependencies
+                .worker
+                .settle;
+
+        if (!settle) {
+            throw new Error(
+                "Active worker workspace cannot be settled because worker.settle() is unavailable"
+            );
+        }
+
+        await settle({
+            run,
+
+            contract:
+                record.contract,
+
+            workspace,
+
+            outcome,
+
+            workerResult
+        });
+
+        /*
+        * Clear only AFTER settlement succeeds.
+        * If the process dies during settlement, recovery can retry it.
+        */
+        delete record.workspace;
+
+        await this.persist(
+            run
+        );
+
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    "worker_workspace_settled",
+
+                timestamp:
+                    this.now(),
+
+                iterationId:
+                    record.contract.id,
+
+                details: {
+                    workspaceId:
+                        workspace.id,
+
+                    outcome
+                }
+            }
+        );
+    }
+}
+
+function getErrorMessage(
+    error:
+        unknown
+): string {
+    return error instanceof
+        Error
+        ? error.message
+        : String(
+            error
+        );
 }

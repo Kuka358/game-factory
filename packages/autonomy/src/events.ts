@@ -31,6 +31,8 @@ export type AutonomyEventType =
     | "iteration_completed"
     | "run_completed"
     | "run_blocked"
+    | "worker_workspace_prepared"
+    | "worker_workspace_settled"
     | "run_failed";
 
 
