@@ -12,3 +12,4 @@ export * from "./git-checkpoint.js";
 export * from "./local-runtime.js";
 export * from "./harness.js";
 export * from "./harness-worker.js";
+export * from "./git-worktree.js";
