@@ -60,6 +60,9 @@ export interface IterationRecord {
 
     completed:
         boolean;
+
+    checkpointId?:
+        string;
 }
 
 export interface AutonomousRun {

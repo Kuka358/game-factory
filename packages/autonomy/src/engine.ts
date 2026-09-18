@@ -3,6 +3,7 @@ import type {
 } from "./contracts.js";
 
 import type {
+    CheckpointManager,
     CodingWorker,
     FailureAdvisor,
     Planner,
@@ -41,6 +42,9 @@ export interface AutonomyEngineDependencies {
 
     runStore?:
         RunStore;
+
+    checkpointManager?:
+        CheckpointManager;
 
     eventJournal?:
         EventJournal;
@@ -225,8 +229,27 @@ export class AutonomyEngine {
         run.failureReason =
             "Maximum autonomous iteration count reached";
 
-        touchRun(
+        await this.persist(
             run
+        );
+
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    "run_blocked",
+
+                timestamp:
+                    this.now(),
+
+                details: {
+                    reason:
+                        run.failureReason
+                }
+            }
         );
 
         return run;
@@ -248,7 +271,7 @@ export class AutonomyEngine {
                     [],
 
                 completed:
-                    false
+                    false,
             };
 
         run.iterations.push(
@@ -258,6 +281,44 @@ export class AutonomyEngine {
         await this.persist(
             run
         );
+
+        if (
+            this.dependencies
+                .checkpointManager
+        ) {
+            const checkpoint =
+                await this.dependencies
+                    .checkpointManager
+                    .create(
+                        run.id,
+                        contract.id
+                    );
+
+            record.checkpointId =
+                checkpoint.id;
+
+            await this.record(
+                run,
+                {
+                    runId:
+                        run.id,
+
+                    type:
+                        "checkpoint_created",
+
+                    timestamp:
+                        this.now(),
+
+                    iterationId:
+                        contract.id,
+
+                    details: {
+                        checkpointId:
+                            checkpoint.id
+                    }
+                }
+            );
+        }
 
         let previousVerification:
             VerificationReport |
@@ -279,7 +340,7 @@ export class AutonomyEngine {
                     ? "implementing"
                     : "repairing";
 
-            touchRun(
+            await this.persist(
                 run
             );
 
@@ -364,10 +425,6 @@ export class AutonomyEngine {
                     run
                 );
 
-                touchRun(
-                    run
-                );
-
                 const verification =
                     await this.dependencies
                         .verifier
@@ -421,6 +478,11 @@ export class AutonomyEngine {
                         run
                     );
 
+                    await this.releaseCheckpoint(
+                        run,
+                        record
+                    );
+
                     await this.record(
                         run,
                         {
@@ -460,10 +522,6 @@ export class AutonomyEngine {
 
                 run.status =
                     "escalating";
-
-                touchRun(
-                    run
-                );
 
                 await this.persist(
                     run
@@ -513,13 +571,18 @@ export class AutonomyEngine {
                         contract.escalation
                             .maxRepairRounds
                     ) {
+                        await this.restoreCheckpoint(
+                            run,
+                            record
+                        );
+
                         run.status =
                             "blocked";
 
                         run.failureReason =
                             "Escalation repair budget exhausted";
 
-                        touchRun(
+                        await this.persist(
                             run
                         );
 
@@ -569,6 +632,11 @@ export class AutonomyEngine {
                     escalation.type ===
                     "abort"
                 ) {
+                    await this.restoreCheckpoint(
+                        run,
+                        record
+                    );
+
                     run.status =
                         "failed";
 
@@ -598,10 +666,6 @@ export class AutonomyEngine {
                         }
                     );
 
-                    touchRun(
-                        run
-                    );
-
                     return false;
                 }
 
@@ -609,6 +673,11 @@ export class AutonomyEngine {
                     escalation.type ===
                     "architecture_required"
                 ) {
+                    await this.restoreCheckpoint(
+                        run,
+                        record
+                    );
+
                     run.status =
                         "blocked";
 
@@ -638,10 +707,6 @@ export class AutonomyEngine {
                         }
                     );
 
-                    touchRun(
-                        run
-                    );
-
                     return false;
                 }
 
@@ -649,12 +714,13 @@ export class AutonomyEngine {
                     escalation.type ===
                     "replan"
                 ) {
+                    await this.restoreCheckpoint(
+                        run,
+                        record
+                    );
+
                     return true;
                 }
-
-                touchRun(
-                    run
-                );
 
                 return false;
             } catch (error) {
@@ -666,15 +732,16 @@ export class AutonomyEngine {
                 attemptRecord.completedAt =
                     this.now();
 
+                await this.restoreCheckpoint(
+                    run,
+                    record
+                );
+
                 run.status =
                     "failed";
 
                 run.failureReason =
                     attemptRecord.error;
-
-                touchRun(
-                    run
-                );
 
                 await this.persist(
                     run
@@ -704,6 +771,111 @@ export class AutonomyEngine {
         }
 
         return false;
+    }
+
+    private async releaseCheckpoint(
+        run:
+            AutonomousRun,
+
+        record:
+            IterationRecord
+    ): Promise<void> {
+        const checkpointId =
+            record.checkpointId;
+
+        const manager =
+            this.dependencies
+                .checkpointManager;
+
+        if (
+            !checkpointId ||
+            !manager
+        ) {
+            return;
+        }
+
+        await manager.release({
+            id:
+                checkpointId
+        });
+
+        record.checkpointId =
+            undefined;
+
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    "checkpoint_released",
+
+                timestamp:
+                    this.now(),
+
+                iterationId:
+                    record.contract.id,
+
+                details: {
+                    checkpointId
+                }
+            }
+        );
+    }
+
+
+    private async restoreCheckpoint(
+        run:
+            AutonomousRun,
+
+        record:
+            IterationRecord
+    ): Promise<void> {
+        const checkpointId =
+            record.checkpointId;
+
+        const manager =
+            this.dependencies
+                .checkpointManager;
+
+        if (
+            !checkpointId ||
+            !manager
+        ) {
+            return;
+        }
+
+        await manager.restore({
+            id:
+                checkpointId
+        });
+
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    "checkpoint_restored",
+
+                timestamp:
+                    this.now(),
+
+                iterationId:
+                    record.contract.id,
+
+                details: {
+                    checkpointId
+                }
+            }
+        );
+
+        await this.releaseCheckpoint(
+            run,
+            record
+        );
     }
 
     private async persist(
@@ -748,14 +920,4 @@ export class AutonomyEngine {
             run
         );
     }
-}
-
-
-function touchRun(
-    run:
-        AutonomousRun
-): void {
-    run.updatedAt =
-        new Date()
-            .toISOString();
 }

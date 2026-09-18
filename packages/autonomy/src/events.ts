@@ -17,6 +17,9 @@ import {
 export type AutonomyEventType =
     | "run_started"
     | "iteration_planned"
+    | "checkpoint_created"
+    | "checkpoint_restored"
+    | "checkpoint_released"
     | "worker_attempt_started"
     | "worker_attempt_completed"
     | "verification_completed"

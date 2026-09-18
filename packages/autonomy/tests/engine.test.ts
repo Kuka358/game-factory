@@ -9,6 +9,7 @@ import {
     createAutonomousRun,
     MemoryEventJournal,
     MemoryRunStore,
+    MemoryCheckpointManager,
     type CodingWorker,
     type FailureAdvisor,
     type Planner,
@@ -222,6 +223,222 @@ describe(
                 ).toBe(
                     "Goal reached"
                 );
+            }
+        );
+
+        it(
+            "restores a checkpoint when worker execution fails",
+            async () => {
+                const planner:
+                    Planner = {
+                        async plan() {
+                            return {
+                                type:
+                                    "iteration",
+
+                                contract
+                            };
+                        }
+                    };
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            throw new Error(
+                                "Worker crashed"
+                            );
+                        }
+                    };
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            throw new Error(
+                                "Verifier should not run"
+                            );
+                        }
+                    };
+
+                const failureAdvisor:
+                    FailureAdvisor = {
+                        async advise() {
+                            throw new Error(
+                                "Advisor should not run"
+                            );
+                        }
+                    };
+
+                const checkpointManager =
+                    new MemoryCheckpointManager();
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        failureAdvisor,
+                        checkpointManager
+                    });
+
+                const result =
+                    await engine.run(
+                        createAutonomousRun({
+                            id:
+                                "checkpoint-failure",
+
+                            goal:
+                                "Rollback test",
+
+                            maxIterations:
+                                2
+                        })
+                    );
+
+                expect(
+                    result.status
+                ).toBe(
+                    "failed"
+                );
+
+                expect(
+                    checkpointManager.createdIds
+                ).toHaveLength(
+                    1
+                );
+
+                expect(
+                    checkpointManager.restoredIds
+                ).toEqual(
+                    checkpointManager.createdIds
+                );
+
+                expect(
+                    checkpointManager.releasedIds
+                ).toEqual(
+                    checkpointManager.createdIds
+                );
+            }
+        );
+
+        it(
+            "creates and releases a checkpoint for a successful iteration",
+            async () => {
+                let planningCalls =
+                    0;
+
+                const planner:
+                    Planner = {
+                        async plan() {
+                            planningCalls +=
+                                1;
+
+                            return planningCalls ===
+                                1
+                                ? {
+                                    type:
+                                        "iteration",
+
+                                    contract
+                                }
+                                : {
+                                    type:
+                                        "complete",
+
+                                    reason:
+                                        "Done"
+                                };
+                        }
+                    };
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            return {
+                                summary:
+                                    "Changed",
+
+                                changedFiles:
+                                    []
+                            };
+                        }
+                    };
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            return {
+                                passed:
+                                    true,
+
+                                checks:
+                                    []
+                            };
+                        }
+                    };
+
+                const failureAdvisor:
+                    FailureAdvisor = {
+                        async advise() {
+                            throw new Error(
+                                "Should not escalate"
+                            );
+                        }
+                    };
+
+                const checkpointManager =
+                    new MemoryCheckpointManager();
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        failureAdvisor,
+                        checkpointManager
+                    });
+
+                const result =
+                    await engine.run(
+                        createAutonomousRun({
+                            id:
+                                "checkpoint-success",
+
+                            goal:
+                                "Checkpoint test",
+
+                            maxIterations:
+                                2
+                        })
+                    );
+
+                expect(
+                    result.status
+                ).toBe(
+                    "completed"
+                );
+
+                expect(
+                    checkpointManager.createdIds
+                ).toHaveLength(
+                    1
+                );
+
+                expect(
+                    checkpointManager.restoredIds
+                ).toHaveLength(
+                    0
+                );
+
+                expect(
+                    checkpointManager.releasedIds
+                ).toEqual(
+                    checkpointManager.createdIds
+                );
+
+                expect(
+                    result.iterations[0]
+                        ?.checkpointId
+                ).toBeUndefined();
             }
         );
 
