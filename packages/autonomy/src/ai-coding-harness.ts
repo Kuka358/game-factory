@@ -26,6 +26,10 @@ import {
     normalizeRepositoryPath
 } from "./workspace.js";
 
+import type {
+    RepositoryContextDiscovery,
+    RepositoryContextSelection
+} from "./repository-context.js";
 
 export interface AICodingHarnessOptions {
     provider:
@@ -41,6 +45,12 @@ export interface AICodingHarnessOptions {
         number;
 
     maxContextFileBytes?:
+        number;
+
+    contextDiscovery?:
+        RepositoryContextDiscovery;
+
+    maxContextBytes?:
         number;
 }
 
@@ -97,6 +107,8 @@ export class AICodingHarness
     private readonly maxContextFileBytes:
         number;
 
+    private readonly maxContextBytes:
+        number;
 
     constructor(
         private readonly options:
@@ -105,6 +117,10 @@ export class AICodingHarness
         this.maxContextFileBytes =
             options.maxContextFileBytes ??
             64_000;
+
+        this.maxContextBytes =
+            options.maxContextBytes ??
+            192_000;
     }
 
 
@@ -112,9 +128,15 @@ export class AICodingHarness
         input:
             CodingHarnessInput
     ): Promise<CodingHarnessResult> {
+        const context =
+            await this.discoverContext(
+                input
+            );
+
         const contextFiles =
             await this.readContextFiles(
-                input
+                input,
+                context.selectedPaths
             );
 
         const response =
@@ -148,7 +170,8 @@ export class AICodingHarness
                             content:
                                 createUserPrompt(
                                     input,
-                                    contextFiles
+                                    contextFiles,
+                                    context.inventory
                                 )
                         }
                     ],
@@ -184,15 +207,17 @@ export class AICodingHarness
 
     private async readContextFiles(
         input:
-            CodingHarnessInput
+            CodingHarnessInput,
+
+        requestedFiles:
+            readonly string[]
     ): Promise<RepositoryContextFile[]> {
-        const requestedFiles =
-            collectFilesHints(
-                input
-            );
 
         const result:
             RepositoryContextFile[] = [];
+
+        let totalBytes =
+            0;
 
         for (
             const rawPath of
@@ -203,10 +228,14 @@ export class AICodingHarness
                     rawPath
                 );
 
+            const contextScope =
+                input.contract.contextScope ??
+                input.contract.scope;
+
             this.guard
                 .assertPathAllowed(
                     path,
-                    input.contract.scope
+                    contextScope
                 );
 
             const absolute =
@@ -238,6 +267,14 @@ export class AICodingHarness
                     continue;
                 }
 
+                if (
+                    totalBytes +
+                        buffer.byteLength >
+                    this.maxContextBytes
+                ) {
+                    continue;
+                }
+
                 /*
                  * Avoid feeding obvious binary files into the model.
                  */
@@ -248,6 +285,9 @@ export class AICodingHarness
                 ) {
                     continue;
                 }
+
+                totalBytes +=
+                    buffer.byteLength;
 
                 result.push({
                     path,
@@ -436,6 +476,87 @@ export class AICodingHarness
 
         return prepared;
     }
+
+    private async discoverContext(
+        input:
+            CodingHarnessInput
+    ): Promise<RepositoryContextSelection> {
+        const hints =
+            collectFilesHints(
+                input
+            );
+
+        const discovery =
+            this.options
+                .contextDiscovery;
+
+        if (!discovery) {
+            return {
+                selectedPaths:
+                    hints,
+
+                inventory:
+                    []
+            };
+        }
+
+        const discovered =
+            await discovery.discover({
+                repositoryRoot:
+                    input.repositoryRoot,
+
+                contract:
+                    input.contract
+            });
+
+        /*
+        * Keep explicit filesHint paths even if they are currently
+        * untracked or do not yet exist.
+        *
+        * This matters for repair attempts and newly-created files.
+        */
+        const selectedPaths:
+            string[] = [];
+
+        const seen =
+            new Set<string>();
+
+        for (
+            const rawPath of
+            [
+                ...hints,
+                ...discovered.selectedPaths
+            ]
+        ) {
+            const path =
+                normalizeRepositoryPath(
+                    rawPath
+                );
+
+            if (
+                seen.has(
+                    path
+                )
+            ) {
+                continue;
+            }
+
+            seen.add(
+                path
+            );
+
+            selectedPaths.push(
+                path
+            );
+        }
+
+        return {
+            selectedPaths,
+
+            inventory:
+                discovered.inventory
+        };
+    }
 }
 
 
@@ -515,7 +636,10 @@ function createUserPrompt(
         CodingHarnessInput,
 
     files:
-        readonly RepositoryContextFile[]
+        readonly RepositoryContextFile[],
+
+    inventory:
+        readonly string[]
 ): string {
     return JSON.stringify(
         {
@@ -541,6 +665,10 @@ function createUserPrompt(
                 scope:
                     input.contract.scope,
 
+                contextScope:
+                    input.contract.contextScope ??
+                    input.contract.scope,
+
                 changes:
                     input.contract.changes,
 
@@ -564,6 +692,9 @@ function createUserPrompt(
             repairInstructions:
                 input.repairInstructions ??
                 [],
+
+            repositoryInventory:
+                inventory,
 
             repositoryFiles:
                 files

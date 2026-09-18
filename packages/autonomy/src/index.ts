@@ -16,3 +16,4 @@ export * from "./git-worktree.js";
 export * from "./isolated-harness-worker.js";
 export * from "./verified-commit.js";
 export * from "./ai-coding-harness.js";
+export * from "./repository-context.js";

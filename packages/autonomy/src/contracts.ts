@@ -60,6 +60,9 @@ export interface IterationContract {
     scope:
         IterationScope;
 
+    contextScope?:
+        IterationScope;
+
     changes:
         readonly IterationChange[];
 

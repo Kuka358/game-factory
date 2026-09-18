@@ -296,6 +296,184 @@ describe(
             }
         );
 
+        it(
+            "can read wider repository context without granting wider write permission",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    await writeFile(
+                        join(
+                            repository,
+                            "src",
+                            "helper.ts"
+                        ),
+                        "export const helper = 42;\n",
+                        "utf8"
+                    );
+
+                    let capturedRequest:
+                        AIRequest |
+                        undefined;
+
+                    const provider =
+                        createProvider(
+                            {
+                                summary:
+                                    "Tried to modify read-only context",
+
+                                edits: [
+                                    {
+                                        operation:
+                                            "write",
+
+                                        path:
+                                            "src/helper.ts",
+
+                                        content:
+                                            "export const helper = 999;\n"
+                                    }
+                                ]
+                            },
+
+                            request => {
+                                capturedRequest =
+                                    request;
+                            }
+                        );
+
+                    const discovery = {
+                        async discover() {
+                            return {
+                                selectedPaths: [
+                                    "src/helper.ts"
+                                ],
+
+                                inventory: [
+                                    "src/existing.ts",
+                                    "src/helper.ts"
+                                ]
+                            };
+                        }
+                    };
+
+                    const narrowContract:
+                        IterationContract = {
+                            ...contract,
+
+                            scope: {
+                                allowedPaths: [
+                                    "src/existing.ts"
+                                ],
+
+                                forbiddenPaths:
+                                    []
+                            },
+
+                            contextScope: {
+                                allowedPaths: [
+                                    "src/**"
+                                ],
+
+                                forbiddenPaths:
+                                    []
+                            }
+                        };
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model",
+
+                            contextDiscovery:
+                                discovery
+                        });
+
+                    await expect(
+                        harness.executeIteration(
+                            createInput(
+                                repository,
+                                narrowContract
+                            )
+                        )
+                    ).rejects.toThrow(
+                        "outside iteration scope"
+                    );
+
+
+                    /*
+                    * The read-only context file was supplied to the model.
+                    */
+                    const userMessage =
+                        capturedRequest
+                            ?.messages
+                            .find(
+                                message =>
+                                    message.role ===
+                                    "user"
+                            );
+
+                    if (
+                        !userMessage ||
+                        typeof userMessage
+                            .content !==
+                            "string"
+                    ) {
+                        throw new Error(
+                            "Expected string user prompt"
+                        );
+                    }
+
+                    const prompt =
+                        JSON.parse(
+                            userMessage.content
+                        );
+
+                    expect(
+                        prompt.repositoryFiles
+                    ).toContainEqual({
+                        path:
+                            "src/helper.ts",
+
+                        content:
+                            "export const helper = 42;\n"
+                    });
+
+
+                    /*
+                    * But the edit was rejected because write permission
+                    * is still controlled exclusively by contract.scope.
+                    */
+                    expect(
+                        await readFile(
+                            join(
+                                repository,
+                                "src",
+                                "helper.ts"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        "export const helper = 42;\n"
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
 
         it(
             "applies scoped delete edits",
@@ -511,6 +689,144 @@ describe(
                         code:
                             "ENOENT"
                     });
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
+            "uses repository discovery to provide bounded related context",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    await writeFile(
+                        join(
+                            repository,
+                            "src",
+                            "helper.ts"
+                        ),
+                        "export const helper = 42;\n",
+                        "utf8"
+                    );
+
+                    let capturedRequest:
+                        AIRequest |
+                        undefined;
+
+                    const provider =
+                        createProvider(
+                            {
+                                summary:
+                                    "Used discovered context",
+
+                                edits:
+                                    []
+                            },
+
+                            request => {
+                                capturedRequest =
+                                    request;
+                            }
+                        );
+
+                    const discovery = {
+                        async discover() {
+                            return {
+                                selectedPaths: [
+                                    "src/helper.ts",
+                                    "src/existing.ts"
+                                ],
+
+                                inventory: [
+                                    "src/existing.ts",
+                                    "src/helper.ts",
+                                    "src/new.ts"
+                                ]
+                            };
+                        }
+                    };
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model",
+
+                            contextDiscovery:
+                                discovery
+                        });
+
+                    await harness.executeIteration(
+                        createInput(
+                            repository
+                        )
+                    );
+
+                    const userMessage =
+                        capturedRequest
+                            ?.messages
+                            .find(
+                                message =>
+                                    message.role ===
+                                    "user"
+                            );
+
+                    if (
+                        !userMessage ||
+                        typeof userMessage
+                            .content !==
+                            "string"
+                    ) {
+                        throw new Error(
+                            "Expected string user prompt"
+                        );
+                    }
+
+                    const prompt =
+                        JSON.parse(
+                            userMessage.content
+                        );
+
+                    expect(
+                        prompt.repositoryInventory
+                    ).toEqual([
+                        "src/existing.ts",
+                        "src/helper.ts",
+                        "src/new.ts"
+                    ]);
+
+                    expect(
+                        prompt.repositoryFiles
+                    ).toEqual([
+                        {
+                            path:
+                                "src/existing.ts",
+
+                            content:
+                                "export const existing = 1;\n"
+                        },
+
+                        {
+                            path:
+                                "src/helper.ts",
+
+                            content:
+                                "export const helper = 42;\n"
+                        }
+                    ]);
                 } finally {
                     await rm(
                         repository,
@@ -755,7 +1071,11 @@ function createProvider(
 
 function createInput(
     repositoryRoot:
-        string
+        string,
+
+    inputContract:
+        IterationContract =
+            contract
 ): CodingHarnessInput {
     return {
         repositoryRoot,
@@ -766,7 +1086,8 @@ function createInput(
         goal:
             "Implement requested source changes",
 
-        contract,
+        contract:
+            inputContract,
 
         attempt:
             1

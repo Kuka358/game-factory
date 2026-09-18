@@ -34,6 +34,7 @@ import {
     AutonomyEngine,
     FileRunStore,
     GitCheckpointManager,
+    GitRepositoryContextDiscovery,
     IsolatedHarnessCodingWorker,
     createAutonomousRun
 } from "../packages/autonomy/dist/index.js";
@@ -106,10 +107,189 @@ try {
             timeoutMs
         });
 
+    let contextObserved =
+        false;
+
+
+    const observedProvider = {
+        id:
+            "lm-studio-context-observer",
+
+        async generate(
+            request
+        ) {
+            const userMessage =
+                request.messages.find(
+                    message =>
+                        message.role ===
+                        "user"
+                );
+
+            if (
+                !userMessage ||
+                typeof userMessage.content !==
+                    "string"
+            ) {
+                throw new Error(
+                    "Live context E2E expected a string user prompt"
+                );
+            }
+
+            const prompt =
+                JSON.parse(
+                    userMessage.content
+                );
+
+            const inventory =
+                Array.isArray(
+                    prompt.repositoryInventory
+                )
+                    ? prompt.repositoryInventory
+                    : [];
+
+            const repositoryFiles =
+                Array.isArray(
+                    prompt.repositoryFiles
+                )
+                    ? prompt.repositoryFiles
+                    : [];
+
+            const contextPaths =
+                repositoryFiles.map(
+                    file =>
+                        file.path
+                );
+
+
+            if (
+                !inventory.includes(
+                    "src/math.ts"
+                )
+            ) {
+                throw new Error(
+                    "Repository inventory does not contain src/math.ts"
+                );
+            }
+
+            if (
+                !inventory.includes(
+                    "src/math.test.ts"
+                )
+            ) {
+                throw new Error(
+                    "Repository inventory does not contain src/math.test.ts"
+                );
+            }
+
+            if (
+                !inventory.includes(
+                    "src/helper.ts"
+                )
+            ) {
+                throw new Error(
+                    "Repository inventory does not contain src/helper.ts"
+                );
+            }
+
+
+            if (
+                !contextPaths.includes(
+                    "src/math.ts"
+                )
+            ) {
+                throw new Error(
+                    "Model context does not contain src/math.ts"
+                );
+            }
+
+            if (
+                !contextPaths.includes(
+                    "src/math.test.ts"
+                )
+            ) {
+                throw new Error(
+                    "Model context does not contain read-only src/math.test.ts"
+                );
+            }
+
+            if (
+                !contextPaths.includes(
+                    "src/helper.ts"
+                )
+            ) {
+                throw new Error(
+                    "Model context does not contain read-only src/helper.ts"
+                );
+            }
+
+
+            if (
+                inventory.includes(
+                    "src/.env.production"
+                ) ||
+                contextPaths.includes(
+                    "src/.env.production"
+                )
+            ) {
+                throw new Error(
+                    "Sensitive tracked .env file leaked into model context"
+                );
+            }
+
+            if (
+                inventory.includes(
+                    "src/secrets/key.ts"
+                ) ||
+                contextPaths.includes(
+                    "src/secrets/key.ts"
+                )
+            ) {
+                throw new Error(
+                    "Forbidden secret path leaked into model context"
+                );
+            }
+
+
+            contextObserved =
+                true;
+
+            console.log(
+                "\nRepository context supplied to Qwen:"
+            );
+
+            console.log(
+                JSON.stringify(
+                    {
+                        inventory,
+                        repositoryFiles:
+                            contextPaths
+                    },
+                    null,
+                    2
+                )
+            );
+
+
+            return provider.generate(
+                request
+            );
+        }
+    };
+
+    const contextDiscovery =
+        new GitRepositoryContextDiscovery({
+            maxSelectedFiles:
+                4,
+
+            maxInventoryEntries:
+                20
+        });
+
 
     const harness =
         new AICodingHarness({
-            provider,
+            provider:
+                observedProvider,
 
             model,
 
@@ -117,7 +297,15 @@ try {
                 0.1,
 
             maxTokens:
-                4096
+                4096,
+
+            contextDiscovery,
+
+            maxContextFileBytes:
+                32_000,
+
+            maxContextBytes:
+                96_000
         });
 
 
@@ -164,12 +352,29 @@ try {
             ),
 
         scope: {
+            /*
+            * Qwen may WRITE only this file.
+            */
             allowedPaths: [
                 "src/math.ts"
             ],
 
             forbiddenPaths:
                 []
+        },
+
+        contextScope: {
+            /*
+            * Qwen may READ related source files, but this does not
+            * grant permission to modify them.
+            */
+            allowedPaths: [
+                "src/**"
+            ],
+
+            forbiddenPaths: [
+                "src/secrets/**"
+            ]
         },
 
         changes: [
@@ -182,7 +387,9 @@ try {
                         "Return min when value is below min.",
                         "Return max when value is above max.",
                         "Otherwise return value.",
-                        "Do not modify any other file."
+                        "Read the supplied related repository files for existing expectations and conventions.",
+                        "Do not modify read-only context files.",
+                        "Do not modify any file other than src/math.ts."
                     ].join(
                         " "
                     ),
@@ -427,6 +634,12 @@ try {
         );
     }
 
+    if (!contextObserved) {
+        throw new Error(
+            "Live Qwen request was sent without observed repository context"
+        );
+    }
+
     if (
         result.currentIteration !==
         1
@@ -613,6 +826,73 @@ try {
     ) {
         throw new Error(
             "Protected file changed in committed HEAD"
+        );
+    }
+
+    const committedMathTest =
+        await runGitOutput(
+            repositoryRoot,
+            [
+                "show",
+                "HEAD:src/math.test.ts"
+            ]
+        );
+
+    const expectedMathTest =
+        [
+            'import { add, clamp } from "./math.js";',
+            "",
+            "// Expected public behaviour:",
+            "// add(2, 3) === 5",
+            "// clamp(5, 0, 10) === 5",
+            "// clamp(-2, 0, 10) === 0",
+            "// clamp(42, 0, 10) === 10",
+            "",
+            "void add;",
+            "void clamp;",
+            ""
+        ].join(
+            "\n"
+        );
+
+    if (
+        committedMathTest !==
+        expectedMathTest
+    ) {
+        throw new Error(
+            "Read-only context file src/math.test.ts was modified"
+        );
+    }
+
+
+    const committedHelper =
+        await runGitOutput(
+            repositoryRoot,
+            [
+                "show",
+                "HEAD:src/helper.ts"
+            ]
+        );
+
+    const expectedHelper =
+        [
+            "/**",
+            " * Math modules in this repository prefer explicit",
+            " * readable control flow over clever expressions.",
+            " */",
+            "export const mathConvention =",
+            '    "prefer explicit readable control flow";',
+            ""
+        ].join(
+            "\n"
+        );
+
+    if (
+        committedHelper !==
+        expectedHelper
+    ) {
+        throw new Error(
+            "Read-only context file src/helper.ts was modified"
         );
     }
 
@@ -851,7 +1131,8 @@ async function initializeRepository(
     await mkdir(
         join(
             repository,
-            "src"
+            "src",
+            "secrets"
         ),
         {
             recursive:
@@ -887,6 +1168,79 @@ async function initializeRepository(
         ].join(
             "\n"
         ),
+        "utf8"
+    );
+
+    await writeFile(
+        join(
+            repository,
+            "src",
+            "math.test.ts"
+        ),
+        [
+            'import { add, clamp } from "./math.js";',
+            "",
+            "// Expected public behaviour:",
+            "// add(2, 3) === 5",
+            "// clamp(5, 0, 10) === 5",
+            "// clamp(-2, 0, 10) === 0",
+            "// clamp(42, 0, 10) === 10",
+            "",
+            "void add;",
+            "void clamp;",
+            ""
+        ].join(
+            "\n"
+        ),
+        "utf8"
+    );
+
+
+    await writeFile(
+        join(
+            repository,
+            "src",
+            "helper.ts"
+        ),
+        [
+            "/**",
+            " * Math modules in this repository prefer explicit",
+            " * readable control flow over clever expressions.",
+            " */",
+            "export const mathConvention =",
+            '    "prefer explicit readable control flow";',
+            ""
+        ].join(
+            "\n"
+        ),
+        "utf8"
+    );
+
+
+    /*
+    * Intentionally TRACKED sensitive file.
+    *
+    * Repository context discovery must still exclude it.
+    */
+    await writeFile(
+        join(
+            repository,
+            "src",
+            ".env.production"
+        ),
+        "API_TOKEN=must-never-reach-model\n",
+        "utf8"
+    );
+
+
+    await writeFile(
+        join(
+            repository,
+            "src",
+            "secrets",
+            "key.ts"
+        ),
+        'export const secret = "must-never-reach-model";\n',
         "utf8"
     );
 
