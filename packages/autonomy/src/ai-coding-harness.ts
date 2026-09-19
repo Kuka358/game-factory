@@ -32,6 +32,15 @@ import {
     type RepositoryContextSelection
 } from "./repository-context.js";
 
+import {
+    ConservativeUtf8TokenEstimator,
+    createModelContextBudget,
+    estimateModelInputTokens,
+    type ModelContextBudget,
+    type ModelContextProfile,
+    type TokenEstimator
+} from "./model-context-budget.js";
+
 export interface AICodingHarnessOptions {
     provider:
         AIProvider;
@@ -53,6 +62,12 @@ export interface AICodingHarnessOptions {
 
     maxContextBytes?:
         number;
+
+    modelContext?:
+        ModelContextProfile;
+
+    tokenEstimator?:
+        TokenEstimator;
 }
 
 
@@ -111,17 +126,55 @@ export class AICodingHarness
     private readonly maxContextBytes:
         number;
 
+    private readonly maxTokens:
+        number;
+
+    private readonly tokenEstimator:
+        TokenEstimator;
+
+    private readonly modelContextBudget?:
+        ModelContextBudget;
+
     constructor(
         private readonly options:
             AICodingHarnessOptions
     ) {
+        this.maxTokens =
+            positiveInteger(
+                options.maxTokens ??
+                    4096,
+                "maxTokens"
+            );
+
+
         this.maxContextFileBytes =
-            options.maxContextFileBytes ??
-            64_000;
+            positiveInteger(
+                options.maxContextFileBytes ??
+                    64_000,
+                "maxContextFileBytes"
+            );
+
 
         this.maxContextBytes =
-            options.maxContextBytes ??
-            192_000;
+            positiveInteger(
+                options.maxContextBytes ??
+                    192_000,
+                "maxContextBytes"
+            );
+
+
+        this.tokenEstimator =
+            options.tokenEstimator ??
+            new ConservativeUtf8TokenEstimator();
+
+
+        this.modelContextBudget =
+            options.modelContext
+                ? createModelContextBudget(
+                    options.modelContext,
+                    this.maxTokens
+                )
+                : undefined;
     }
 
 
@@ -129,16 +182,44 @@ export class AICodingHarness
         input:
             CodingHarnessInput
     ): Promise<CodingHarnessResult> {
+        const systemPrompt =
+            createSystemPrompt();
+
+
+        const responseSchema =
+            createResponseSchema();
+
+
         const context =
             await this.discoverContext(
                 input
             );
+
 
         const contextFiles =
             await this.readContextFiles(
                 input,
                 context.selectedPaths
             );
+
+
+        const promptContext =
+            this.selectPromptContext(
+                input,
+                contextFiles,
+                context.inventory,
+                systemPrompt,
+                responseSchema
+            );
+
+
+        const userPrompt =
+            createUserPrompt(
+                input,
+                promptContext.files,
+                promptContext.inventory
+            );
+
 
         const response =
             await this.options
@@ -152,8 +233,7 @@ export class AICodingHarness
                         0.1,
 
                     maxTokens:
-                        this.options.maxTokens ??
-                        4096,
+                        this.maxTokens,
 
                     messages: [
                         {
@@ -161,7 +241,7 @@ export class AICodingHarness
                                 "system",
 
                             content:
-                                createSystemPrompt()
+                                systemPrompt
                         },
 
                         {
@@ -169,11 +249,7 @@ export class AICodingHarness
                                 "user",
 
                             content:
-                                createUserPrompt(
-                                    input,
-                                    contextFiles,
-                                    context.inventory
-                                )
+                                userPrompt
                         }
                     ],
 
@@ -182,7 +258,7 @@ export class AICodingHarness
                             "coding_iteration",
 
                         schema:
-                            createResponseSchema()
+                            responseSchema
                     }
                 });
 
@@ -326,6 +402,278 @@ export class AICodingHarness
         }
 
         return result;
+    }
+
+    private selectPromptContext(
+        input:
+            CodingHarnessInput,
+
+        files:
+            readonly RepositoryContextFile[],
+
+        inventory:
+            readonly string[],
+
+        systemPrompt:
+            string,
+
+        responseSchema:
+            Record<string, unknown>
+    ): {
+        files:
+            readonly RepositoryContextFile[];
+
+        inventory:
+            readonly string[];
+    } {
+        const budget =
+            this.modelContextBudget;
+
+
+        /*
+         * Preserve the previous behaviour unless a model context
+         * profile has explicitly been configured.
+         */
+        if (!budget) {
+            return {
+                files,
+                inventory
+            };
+        }
+
+
+        const requiredPaths =
+            new Set(
+                collectFilesHints(
+                    input
+                )
+            );
+
+
+        const requiredFiles =
+            files.filter(
+                file =>
+                    requiredPaths.has(
+                        file.path
+                    )
+            );
+
+
+        const optionalFiles =
+            files.filter(
+                file =>
+                    !requiredPaths.has(
+                        file.path
+                    )
+            );
+
+
+        const selectedFiles:
+            RepositoryContextFile[] = [];
+
+
+        const selectedInventory:
+            string[] = [];
+
+
+        const baseEstimate =
+            this.estimateInputTokens(
+                budget,
+                input,
+                selectedFiles,
+                selectedInventory,
+                systemPrompt,
+                responseSchema
+            );
+
+
+        if (
+            baseEstimate >
+            budget.maxInputTokens
+        ) {
+            throw new Error(
+                [
+                    "Iteration metadata exceeds model input budget:",
+                    `estimated=${baseEstimate},`,
+                    `limit=${budget.maxInputTokens},`,
+                    `contextWindow=${budget.contextWindowTokens},`,
+                    `reservedOutput=${budget.reservedOutputTokens}`
+                ].join(
+                    " "
+                )
+            );
+        }
+
+
+        /*
+         * Existing explicitly-hinted files are mandatory context.
+         *
+         * If they do not fit, fail deterministically instead of
+         * silently asking the model to edit a file it cannot see.
+         */
+        for (
+            const file of
+            requiredFiles
+        ) {
+            const trialFiles = [
+                ...selectedFiles,
+                file
+            ];
+
+
+            const estimate =
+                this.estimateInputTokens(
+                    budget,
+                    input,
+                    trialFiles,
+                    selectedInventory,
+                    systemPrompt,
+                    responseSchema
+                );
+
+
+            if (
+                estimate >
+                budget.maxInputTokens
+            ) {
+                throw new Error(
+                    [
+                        "Required repository context exceeds model input budget",
+                        `while adding ${file.path}:`,
+                        `estimated=${estimate},`,
+                        `limit=${budget.maxInputTokens}`
+                    ].join(
+                        " "
+                    )
+                );
+            }
+
+
+            selectedFiles.push(
+                file
+            );
+        }
+
+
+        /*
+         * Repository-intelligence files are useful but optional.
+         * Keep them in discovery rank order until the token budget
+         * is exhausted.
+         */
+        for (
+            const file of
+            optionalFiles
+        ) {
+            const trialFiles = [
+                ...selectedFiles,
+                file
+            ];
+
+
+            const estimate =
+                this.estimateInputTokens(
+                    budget,
+                    input,
+                    trialFiles,
+                    selectedInventory,
+                    systemPrompt,
+                    responseSchema
+                );
+
+
+            if (
+                estimate <=
+                budget.maxInputTokens
+            ) {
+                selectedFiles.push(
+                    file
+                );
+            }
+        }
+
+
+        /*
+         * Inventory is lower-value than actual source contents.
+         * Add it only after file context has been selected.
+         */
+        for (
+            const path of
+            inventory
+        ) {
+            const trialInventory = [
+                ...selectedInventory,
+                path
+            ];
+
+
+            const estimate =
+                this.estimateInputTokens(
+                    budget,
+                    input,
+                    selectedFiles,
+                    trialInventory,
+                    systemPrompt,
+                    responseSchema
+                );
+
+
+            if (
+                estimate <=
+                budget.maxInputTokens
+            ) {
+                selectedInventory.push(
+                    path
+                );
+            }
+        }
+
+
+        return {
+            files:
+                selectedFiles,
+
+            inventory:
+                selectedInventory
+        };
+    }
+
+
+    private estimateInputTokens(
+        budget:
+            ModelContextBudget,
+
+        input:
+            CodingHarnessInput,
+
+        files:
+            readonly RepositoryContextFile[],
+
+        inventory:
+            readonly string[],
+
+        systemPrompt:
+            string,
+
+        responseSchema:
+            Record<string, unknown>
+    ): number {
+        return estimateModelInputTokens({
+            budget,
+
+            estimator:
+                this.tokenEstimator,
+
+            systemPrompt,
+
+            userPrompt:
+                createUserPrompt(
+                    input,
+                    files,
+                    inventory
+                ),
+
+            responseSchema
+        });
     }
 
 
@@ -988,4 +1336,27 @@ function isMissingFileError(
         ).code ===
             "ENOENT"
     );
+}
+
+function positiveInteger(
+    value:
+        number,
+
+    name:
+        string
+): number {
+    if (
+        !Number.isInteger(
+            value
+        ) ||
+        value <=
+            0
+    ) {
+        throw new Error(
+            `${name} must be a positive integer`
+        );
+    }
+
+
+    return value;
 }

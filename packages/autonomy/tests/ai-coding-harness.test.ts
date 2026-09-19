@@ -619,6 +619,319 @@ describe(
             }
         );
 
+        it(
+            "prioritizes required hinted files over optional context when token budget is limited",
+            async () => {
+                const repository =
+                    await createRepository();
+
+
+                try {
+                    await writeFile(
+                        join(
+                            repository,
+                            "src",
+                            "existing.ts"
+                        ),
+                        'export const marker = "REQUIRED_CONTEXT_TOKEN";\n',
+                        "utf8"
+                    );
+
+
+                    await writeFile(
+                        join(
+                            repository,
+                            "src",
+                            "helper.ts"
+                        ),
+                        'export const marker = "OPTIONAL_CONTEXT_TOKEN";\n',
+                        "utf8"
+                    );
+
+
+                    let capturedRequest:
+                        AIRequest |
+                        undefined;
+
+
+                    const provider =
+                        createProvider(
+                            {
+                                summary:
+                                    "Used budgeted context",
+
+                                edits:
+                                    []
+                            },
+
+                            request => {
+                                capturedRequest =
+                                    request;
+                            }
+                        );
+
+
+                    const discovery = {
+                        async discover() {
+                            return {
+                                selectedPaths: [
+                                    "src/helper.ts"
+                                ],
+
+                                inventory: [
+                                    "src/existing.ts",
+                                    "src/helper.ts"
+                                ]
+                            };
+                        }
+                    };
+
+
+                    const tokenEstimator = {
+                        estimateTokens(
+                            text:
+                                string
+                        ) {
+                            let tokens =
+                                0;
+
+
+                            if (
+                                text.includes(
+                                    "REQUIRED_CONTEXT_TOKEN"
+                                )
+                            ) {
+                                tokens +=
+                                    30;
+                            }
+
+
+                            if (
+                                text.includes(
+                                    "OPTIONAL_CONTEXT_TOKEN"
+                                )
+                            ) {
+                                tokens +=
+                                    100;
+                            }
+
+
+                            return tokens;
+                        }
+                    };
+
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model",
+
+                            maxTokens:
+                                20,
+
+                            modelContext: {
+                                contextWindowTokens:
+                                    100,
+
+                                safetyMarginTokens:
+                                    0,
+
+                                requestOverheadTokens:
+                                    0
+                            },
+
+                            tokenEstimator,
+
+                            contextDiscovery:
+                                discovery
+                        });
+
+
+                    await harness.executeIteration(
+                        createInput(
+                            repository
+                        )
+                    );
+
+
+                    const userMessage =
+                        capturedRequest
+                            ?.messages
+                            .find(
+                                message =>
+                                    message.role ===
+                                    "user"
+                            );
+
+
+                    if (
+                        !userMessage ||
+                        typeof userMessage.content !==
+                            "string"
+                    ) {
+                        throw new Error(
+                            "Expected string user prompt"
+                        );
+                    }
+
+
+                    const prompt =
+                        JSON.parse(
+                            userMessage.content
+                        );
+
+
+                    expect(
+                        prompt.repositoryFiles
+                            .map(
+                                (
+                                    file:
+                                        {
+                                            path:
+                                                string;
+                                        }
+                                ) =>
+                                    file.path
+                            )
+                    ).toEqual([
+                        "src/existing.ts"
+                    ]);
+
+
+                    expect(
+                        capturedRequest
+                            ?.maxTokens
+                    ).toBe(
+                        20
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+
+        it(
+            "fails before calling the model when required context cannot fit",
+            async () => {
+                const repository =
+                    await createRepository();
+
+
+                try {
+                    await writeFile(
+                        join(
+                            repository,
+                            "src",
+                            "existing.ts"
+                        ),
+                        'export const marker = "REQUIRED_CONTEXT_TOKEN";\n',
+                        "utf8"
+                    );
+
+
+                    let providerCalled =
+                        false;
+
+
+                    const provider =
+                        createProvider(
+                            {
+                                summary:
+                                    "Should not run",
+
+                                edits:
+                                    []
+                            },
+
+                            () => {
+                                providerCalled =
+                                    true;
+                            }
+                        );
+
+
+                    const tokenEstimator = {
+                        estimateTokens(
+                            text:
+                                string
+                        ) {
+                            return text.includes(
+                                "REQUIRED_CONTEXT_TOKEN"
+                            )
+                                ? 100
+                                : 0;
+                        }
+                    };
+
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model",
+
+                            maxTokens:
+                                20,
+
+                            modelContext: {
+                                contextWindowTokens:
+                                    100,
+
+                                safetyMarginTokens:
+                                    0,
+
+                                requestOverheadTokens:
+                                    0
+                            },
+
+                            tokenEstimator
+                        });
+
+
+                    await expect(
+                        harness.executeIteration(
+                            createInput(
+                                repository
+                            )
+                        )
+                    ).rejects.toThrow(
+                        "Required repository context exceeds model input budget"
+                    );
+
+
+                    expect(
+                        providerCalled
+                    ).toBe(
+                        false
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
 
         it(
             "applies scoped delete edits",
