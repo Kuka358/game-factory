@@ -978,6 +978,294 @@ describe(
         );
 
         it(
+            "rejects a network-denied policy that the local backend cannot enforce",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    const verifier =
+                        new DeterministicCommandVerifier({
+                            commands: [
+                                {
+                                    command:
+                                        "verify:no-network",
+
+                                    executable:
+                                        process.execPath,
+
+                                    policy: {
+                                        network:
+                                            "deny",
+
+                                        filesystem:
+                                            "workspace-only",
+
+                                        childProcesses:
+                                            "allow"
+                                    },
+
+                                    args: [
+                                        "-e",
+                                        ""
+                                    ]
+                                }
+                            ]
+                        });
+
+
+                    await expect(
+                        verifier.verify(
+                            createInput(
+                                repository,
+                                [
+                                    {
+                                        id:
+                                            "no-network",
+
+                                        command:
+                                            "verify:no-network",
+
+                                        required:
+                                            true
+                                    }
+                                ]
+                            )
+                        )
+                    ).rejects.toThrow(
+                        "cannot enforce network=deny"
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+
+        it(
+            "preflights the complete isolation policy batch before executing anything",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    const markerPath =
+                        join(
+                            repository,
+                            "policy-marker.txt"
+                        );
+
+
+                    const verifier =
+                        new DeterministicCommandVerifier({
+                            commands: [
+                                {
+                                    command:
+                                        "verify:create-policy-marker",
+
+                                    executable:
+                                        process.execPath,
+
+                                    args: [
+                                        "-e",
+                                        [
+                                            'require("node:fs")',
+                                            '.writeFileSync(',
+                                            JSON.stringify(
+                                                markerPath
+                                            ),
+                                            ', "executed\\n");'
+                                        ].join(
+                                            ""
+                                        )
+                                    ]
+                                },
+
+                                {
+                                    command:
+                                        "verify:strict-isolation",
+
+                                    executable:
+                                        process.execPath,
+
+                                    policy: {
+                                        network:
+                                            "deny",
+
+                                        filesystem:
+                                            "workspace-only",
+
+                                        childProcesses:
+                                            "allow"
+                                    },
+
+                                    args: [
+                                        "-e",
+                                        ""
+                                    ]
+                                }
+                            ]
+                        });
+
+
+                    await expect(
+                        verifier.verify(
+                            createInput(
+                                repository,
+                                [
+                                    {
+                                        id:
+                                            "marker",
+
+                                        command:
+                                            "verify:create-policy-marker",
+
+                                        required:
+                                            true
+                                    },
+
+                                    {
+                                        id:
+                                            "strict",
+
+                                        command:
+                                            "verify:strict-isolation",
+
+                                        required:
+                                            true
+                                    }
+                                ]
+                            )
+                        )
+                    ).rejects.toThrow(
+                        "a stronger execution backend is required"
+                    );
+
+
+                    /*
+                     * The first command must never run because the
+                     * second command's unsupported isolation policy
+                     * invalidates the entire verification batch.
+                     */
+                    await expect(
+                        access(
+                            markerPath
+                        )
+                    ).rejects.toMatchObject({
+                        code:
+                            "ENOENT"
+                    });
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+
+        it(
+            "continues to execute the explicitly supported host-process policy",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    const verifier =
+                        new DeterministicCommandVerifier({
+                            commands: [
+                                {
+                                    command:
+                                        "verify:host-process-policy",
+
+                                    executable:
+                                        process.execPath,
+
+                                    policy: {
+                                        network:
+                                            "allow",
+
+                                        filesystem:
+                                            "host",
+
+                                        childProcesses:
+                                            "allow"
+                                    },
+
+                                    args: [
+                                        "-e",
+                                        'process.stdout.write("supported")'
+                                    ]
+                                }
+                            ]
+                        });
+
+
+                    const report =
+                        await verifier.verify(
+                            createInput(
+                                repository,
+                                [
+                                    {
+                                        id:
+                                            "host-policy",
+
+                                        command:
+                                            "verify:host-process-policy",
+
+                                        required:
+                                            true
+                                    }
+                                ]
+                            )
+                        );
+
+
+                    expect(
+                        report.passed
+                    ).toBe(
+                        true
+                    );
+
+
+                    expect(
+                        report.checks[0]
+                            ?.stdout
+                    ).toBe(
+                        "supported"
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
             "refuses verification without an isolated workspace",
             async () => {
                 const verifier =

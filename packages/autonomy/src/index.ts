@@ -20,3 +20,4 @@ export * from "./repository-context.js";
 export * from "./command-verifier.js";
 export * from "./repository-intelligence.js";
 export * from "./execution-sandbox.js";
+export * from "./execution-policy.js";

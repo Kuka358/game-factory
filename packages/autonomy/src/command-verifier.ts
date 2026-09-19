@@ -27,6 +27,11 @@ import {
     type ExecutionSandbox
 } from "./execution-sandbox.js";
 
+import {
+    normalizeExecutionPolicy,
+    type ExecutionPolicy
+} from "./execution-policy.js";
+
 
 export interface VerificationCommandDefinition {
     /**
@@ -49,6 +54,9 @@ export interface VerificationCommandDefinition {
 
     environment?:
         ExecutionEnvironmentPolicy;
+
+    policy?:
+        ExecutionPolicy;
 }
 
 
@@ -283,23 +291,36 @@ export class DeterministicCommandVerifier
                 step.command
             );
 
+
         const command =
             step.command
                 .trim();
 
-        if (
-            !this.commands.has(
+
+        const definition =
+            this.commands.get(
                 command
-            )
-        ) {
-            /*
-             * Should normally be unreachable because WorkspaceGuard
-             * uses the same allowlist, but keep the invariant local.
-             */
+            );
+
+
+        if (!definition) {
             throw new Error(
                 `Verification command is not configured: ${command}`
             );
         }
+
+
+        /*
+         * The COMPLETE verification batch is preflighted before
+         * execution. Therefore an unsupported security policy in
+         * command #2 must prevent command #1 from running too.
+         */
+        this.sandbox
+            .assertPolicySupported(
+                normalizeExecutionPolicy(
+                    definition.policy
+                )
+            );
     }
 
 
@@ -349,7 +370,12 @@ export class DeterministicCommandVerifier
                         this.maxOutputBytes,
 
                     environment:
-                        definition.environment
+                        definition.environment,
+
+                    policy:
+                        normalizeExecutionPolicy(
+                            definition.policy
+                        ),
                 });
 
 

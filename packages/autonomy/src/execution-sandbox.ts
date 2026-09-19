@@ -10,6 +10,12 @@ import {
     resolve
 } from "node:path";
 
+import {
+    HOST_PROCESS_EXECUTION_POLICY,
+    normalizeExecutionPolicy,
+    type ExecutionPolicy
+} from "./execution-policy.js";
+
 
 export interface ExecutionEnvironmentPolicy {
     /**
@@ -52,6 +58,9 @@ export interface ExecutionSandboxInput {
 
     environment?:
         ExecutionEnvironmentPolicy;
+
+    policy?:
+        ExecutionPolicy;
 }
 
 
@@ -80,6 +89,11 @@ export interface ExecutionSandboxResult {
 
 
 export interface ExecutionSandbox {
+    assertPolicySupported(
+        policy:
+            ExecutionPolicy
+    ): void;
+
     execute(
         input:
             ExecutionSandboxInput
@@ -173,6 +187,58 @@ export class LocalProcessExecutionSandbox
             );
     }
 
+    assertPolicySupported(
+        policy:
+            ExecutionPolicy
+    ): void {
+        if (
+            policy.network !==
+            HOST_PROCESS_EXECUTION_POLICY.network
+        ) {
+            throw new Error(
+                [
+                    "Local process execution sandbox cannot enforce",
+                    `network=${policy.network};`,
+                    "a stronger execution backend is required"
+                ].join(
+                    " "
+                )
+            );
+        }
+
+
+        if (
+            policy.filesystem !==
+            HOST_PROCESS_EXECUTION_POLICY.filesystem
+        ) {
+            throw new Error(
+                [
+                    "Local process execution sandbox cannot enforce",
+                    `filesystem=${policy.filesystem};`,
+                    "a stronger execution backend is required"
+                ].join(
+                    " "
+                )
+            );
+        }
+
+
+        if (
+            policy.childProcesses !==
+            HOST_PROCESS_EXECUTION_POLICY.childProcesses
+        ) {
+            throw new Error(
+                [
+                    "Local process execution sandbox cannot enforce",
+                    `childProcesses=${policy.childProcesses};`,
+                    "a stronger execution backend is required"
+                ].join(
+                    " "
+                )
+            );
+        }
+    }
+
 
     async execute(
         input:
@@ -180,6 +246,17 @@ export class LocalProcessExecutionSandbox
     ): Promise<ExecutionSandboxResult> {
         validateInput(
             input
+        );
+
+
+        const policy =
+            normalizeExecutionPolicy(
+                input.policy
+            );
+
+
+        this.assertPolicySupported(
+            policy
         );
 
 
