@@ -36,14 +36,17 @@ export class EventBus {
         event: string,
         payload: T
     ): void {
-        const handlers =
-            this.listeners.get(event);
+        const handlers = this.listeners.get(event);
 
         if (!handlers) {
             return;
         }
 
-        for (const handler of handlers) {
+        // Create a snapshot of the current listeners to ensure stable dispatch.
+        // This prevents mutations during emit from affecting the current event.
+        const handlerArray = Array.from(handlers);
+
+        for (const handler of handlerArray) {
             handler(payload);
         }
     }
