@@ -1,8 +1,5 @@
 import {
-    execFile
-} from "node:child_process";
-
-import {
+    isAbsolute,
     resolve
 } from "node:path";
 
@@ -24,6 +21,12 @@ import {
     WorkspaceGuard
 } from "./workspace.js";
 
+import {
+    LocalProcessExecutionSandbox,
+    type ExecutionEnvironmentPolicy,
+    type ExecutionSandbox
+} from "./execution-sandbox.js";
+
 
 export interface VerificationCommandDefinition {
     /**
@@ -43,6 +46,9 @@ export interface VerificationCommandDefinition {
 
     timeoutMs?:
         number;
+
+    environment?:
+        ExecutionEnvironmentPolicy;
 }
 
 
@@ -55,6 +61,9 @@ export interface DeterministicCommandVerifierOptions {
 
     maxOutputBytes?:
         number;
+    
+    sandbox?:
+        ExecutionSandbox;
 }
 
 
@@ -76,6 +85,9 @@ export class DeterministicCommandVerifier
     private readonly maxOutputBytes:
         number;
 
+    private readonly sandbox:
+        ExecutionSandbox;
+
 
     constructor(
         options:
@@ -96,6 +108,10 @@ export class DeterministicCommandVerifier
 
                 "maxOutputBytes"
             );
+
+        this.sandbox =
+            options.sandbox ??
+            new LocalProcessExecutionSandbox();
 
         const allowedCommands:
             string[] = [];
@@ -127,6 +143,16 @@ export class DeterministicCommandVerifier
             ) {
                 throw new Error(
                     `Verification executable must not be empty: ${command}`
+                );
+            }
+
+            if (
+                !isAbsolute(
+                    executable
+                )
+            ) {
+                throw new Error(
+                    `Verification executable must be absolute: ${command}`
                 );
             }
 
@@ -303,24 +329,37 @@ export class DeterministicCommandVerifier
             Date.now();
 
         const execution =
-            await executeCommand({
-                executable:
-                    definition.executable,
+            await this.sandbox
+                .execute({
+                    executable:
+                        definition.executable,
 
-                args:
-                    definition.args ??
-                    [],
+                    args:
+                        definition.args ??
+                        [],
 
-                cwd:
-                    workspaceRoot,
+                    cwd:
+                        workspaceRoot,
 
-                timeoutMs:
-                    definition.timeoutMs ??
-                    this.defaultTimeoutMs,
+                    timeoutMs:
+                        definition.timeoutMs ??
+                        this.defaultTimeoutMs,
 
-                maxOutputBytes:
-                    this.maxOutputBytes
-            });
+                    maxOutputBytes:
+                        this.maxOutputBytes,
+
+                    environment:
+                        definition.environment
+                });
+
+
+        const passed =
+            execution.exitCode ===
+                0 &&
+            !execution.timedOut &&
+            !execution.outputLimitExceeded &&
+            execution.errorMessage ===
+                undefined;
 
         return {
             id:
@@ -329,30 +368,27 @@ export class DeterministicCommandVerifier
             command:
                 step.command,
 
-            passed:
-                execution.error ===
-                null,
+            passed,
 
             exitCode:
-                execution.error ===
-                null
-                    ? 0
-                    : getNumericExitCode(
-                        execution.error
-                    ),
+                execution.exitCode,
 
             stdout:
                 execution.stdout,
 
             stderr:
-                execution.error !==
-                    null &&
+                !passed &&
                 execution.stderr
                     .trim()
                     .length ===
                     0
-                    ? execution.error
-                        .message
+                    ? execution.errorMessage ??
+                        (
+                            execution.exitCode !==
+                            undefined
+                                ? `Process exited with code ${execution.exitCode}`
+                                : "Verification process failed"
+                        )
                     : execution.stderr,
 
             durationMs:
@@ -361,136 +397,6 @@ export class DeterministicCommandVerifier
         };
     }
 }
-
-
-interface ExecuteCommandInput {
-    executable:
-        string;
-
-    args:
-        readonly string[];
-
-    cwd:
-        string;
-
-    timeoutMs:
-        number;
-
-    maxOutputBytes:
-        number;
-}
-
-
-interface CommandExecutionResult {
-    error:
-        Error | null;
-
-    stdout:
-        string;
-
-    stderr:
-        string;
-}
-
-
-function executeCommand(
-    input:
-        ExecuteCommandInput
-): Promise<CommandExecutionResult> {
-    return new Promise(
-        resolveResult => {
-            execFile(
-                input.executable,
-
-                [
-                    ...input.args
-                ],
-
-                {
-                    cwd:
-                        input.cwd,
-
-                    encoding:
-                        "utf8",
-
-                    windowsHide:
-                        true,
-
-                    timeout:
-                        input.timeoutMs,
-
-                    killSignal:
-                        "SIGKILL",
-
-                    maxBuffer:
-                        input.maxOutputBytes
-                },
-
-                (
-                    error,
-                    stdout,
-                    stderr
-                ) => {
-                    resolveResult({
-                        error,
-
-                        stdout:
-                            toText(
-                                stdout
-                            ),
-
-                        stderr:
-                            toText(
-                                stderr
-                            )
-                    });
-                }
-            );
-        }
-    );
-}
-
-
-function toText(
-    value:
-        string | Buffer
-): string {
-    return typeof value ===
-        "string"
-        ? value
-        : value.toString(
-            "utf8"
-        );
-}
-
-
-function getNumericExitCode(
-    error:
-        Error
-): number | undefined {
-    if (
-        !(
-            "code" in
-            error
-        )
-    ) {
-        return undefined;
-    }
-
-    const code =
-        (
-            error as Error & {
-                code?:
-                    string | number;
-            }
-        ).code;
-
-    return typeof code ===
-        "number"
-        ? code
-        : undefined;
-}
-
 
 function positiveInteger(
     value:
