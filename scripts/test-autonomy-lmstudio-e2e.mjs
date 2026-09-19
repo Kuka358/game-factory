@@ -15,12 +15,17 @@ import {
 } from "node:os";
 
 import {
+    dirname,
     join
 } from "node:path";
 
 import {
     promisify
 } from "node:util";
+
+import {
+    fileURLToPath
+} from "node:url";
 
 import vm from "node:vm";
 import ts from "typescript";
@@ -32,6 +37,7 @@ import {
 import {
     AICodingHarness,
     AutonomyEngine,
+    DeterministicCommandVerifier,
     FileRunStore,
     GitCheckpointManager,
     GitRepositoryContextDiscovery,
@@ -43,6 +49,19 @@ import {
 const execFileAsync =
     promisify(
         execFile
+    );
+
+const scriptDirectory =
+    dirname(
+        fileURLToPath(
+            import.meta.url
+        )
+    );
+
+const fixtureVerifierPath =
+    join(
+        scriptDirectory,
+        "verify-autonomy-math-fixture.mjs"
     );
 
 
@@ -414,7 +433,7 @@ try {
                     "typescript",
 
                 command:
-                    "deterministic TypeScript compiler verification",
+                    "verify:typescript",
 
                 required:
                     true
@@ -425,7 +444,7 @@ try {
                     "runtime",
 
                 command:
-                    "sandboxed runtime assertions",
+                    "verify:runtime",
 
                 required:
                     true
@@ -482,25 +501,48 @@ try {
     };
 
 
-    const verifier = {
-        async verify(
-            input
-        ) {
-            const workspaceRoot =
-                input.workspace
-                    ?.root;
+    const verifier =
+        new DeterministicCommandVerifier({
+            commands: [
+                {
+                    command:
+                        "verify:typescript",
 
-            if (!workspaceRoot) {
-                throw new Error(
-                    "Live verifier requires an isolated workspace"
-                );
-            }
+                    executable:
+                        process.execPath,
 
-            return verifyMathModule(
-                workspaceRoot
-            );
-        }
-    };
+                    args: [
+                        fixtureVerifierPath,
+                        "typescript"
+                    ],
+
+                    timeoutMs:
+                        30_000
+                },
+
+                {
+                    command:
+                        "verify:runtime",
+
+                    executable:
+                        process.execPath,
+
+                    args: [
+                        fixtureVerifierPath,
+                        "runtime"
+                    ],
+
+                    timeoutMs:
+                        30_000
+                }
+            ],
+
+            defaultTimeoutMs:
+                30_000,
+
+            maxOutputBytes:
+                100_000
+        });
 
 
     const failureAdvisor = {
@@ -667,6 +709,58 @@ try {
     ) {
         throw new Error(
             "Iteration was not marked completed"
+        );
+    }
+
+    const engineVerification =
+        iteration
+            .attempts[0]
+            ?.verification;
+
+    if (
+        !engineVerification ||
+        !engineVerification.passed
+    ) {
+        throw new Error(
+            "Engine did not persist a passing command verification report"
+        );
+    }
+
+    if (
+        engineVerification
+            .checks
+            .length !==
+        2
+    ) {
+        throw new Error(
+            `Expected 2 command verification checks, got ${engineVerification.checks.length}`
+        );
+    }
+
+
+    for (
+        const check of
+        engineVerification.checks
+    ) {
+        if (
+            !check.passed
+        ) {
+            throw new Error(
+                `Command verification failed: ${check.id}`
+            );
+        }
+
+        if (
+            check.exitCode !==
+            0
+        ) {
+            throw new Error(
+                `Command verifier returned unexpected exit code for ${check.id}: ${check.exitCode}`
+            );
+        }
+
+        console.log(
+            `PASS command-verifier:${check.id} exit=${check.exitCode} duration=${check.durationMs ?? 0}ms`
         );
     }
 
