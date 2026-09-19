@@ -23,3 +23,4 @@ export * from "./execution-sandbox.js";
 export * from "./execution-policy.js";
 export * from "./docker-execution-sandbox.js";
 export * from "./model-context-budget.js";
+export * from "./model-context-profiles.js";

@@ -18,7 +18,8 @@ import {
 } from "../packages/ai/dist/index.js";
 
 import {
-    AICodingHarness
+    AICodingHarness,
+    getModelContextPreset
 } from "../packages/autonomy/dist/index.js";
 
 
@@ -102,6 +103,12 @@ try {
     let usageObserved =
         false;
 
+    const codingPreset =
+        getModelContextPreset(
+            process.env.AUTONOMY_MODEL_CONTEXT_PRESET ??
+            "qwen3.5-9b-lmstudio-32k"
+        );
+
 
     const harness =
         new AICodingHarness({
@@ -113,18 +120,12 @@ try {
                 0.1,
 
             maxTokens:
-                8_192,
+                codingPreset
+                    .maxOutputTokens,
 
-            modelContext: {
-                contextWindowTokens:
-                    32_768,
-
-                safetyMarginTokens:
-                    2_048,
-
-                requestOverheadTokens:
-                    512
-            },
+            modelContext:
+                codingPreset
+                    .context,
 
             contextBudgetObserver(
                 report
@@ -298,6 +299,8 @@ try {
                 );
             }
         });
+
+    
 
 
     const result =
