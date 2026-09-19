@@ -21,6 +21,10 @@ import {
     normalizeRepositoryPath
 } from "./workspace.js";
 
+import {
+    TypeScriptRepositoryIntelligence,
+    type RepositoryIntelligence
+} from "./repository-intelligence.js";
 
 const execFileAsync =
     promisify(
@@ -68,6 +72,9 @@ export interface GitRepositoryContextDiscoveryOptions {
 
     maxInventoryEntries?:
         number;
+
+    intelligence?:
+        RepositoryIntelligence;
 }
 
 
@@ -83,6 +90,8 @@ export class GitRepositoryContextDiscovery
     private readonly guard =
         new WorkspaceGuard();
 
+    private readonly intelligence:
+        RepositoryIntelligence;
 
     constructor(
         options:
@@ -101,6 +110,10 @@ export class GitRepositoryContextDiscovery
                 200,
                 "maxInventoryEntries"
             );
+
+        this.intelligence =
+            options.intelligence ??
+            new TypeScriptRepositoryIntelligence();
     }
 
 
@@ -161,6 +174,29 @@ export class GitRepositoryContextDiscovery
                 input.contract
             );
 
+        const related =
+            await this.intelligence
+                .analyze({
+                    repositoryRoot,
+
+                    eligiblePaths:
+                        eligible,
+
+                    seedPaths:
+                        hints
+                });
+
+
+        const relationshipScores =
+            new Map(
+                related.map(
+                    item => [
+                        item.path,
+                        item.score
+                    ] as const
+                )
+            );
+
         const ranked =
             eligible
                 .map(
@@ -171,7 +207,11 @@ export class GitRepositoryContextDiscovery
                             scorePath(
                                 path,
                                 hints,
-                                input.contract
+                                input.contract,
+                                relationshipScores.get(
+                                    path
+                                ) ??
+                                0
                             )
                     })
                 )
@@ -469,10 +509,13 @@ function scorePath(
         readonly string[],
 
     contract:
-        IterationContract
+        IterationContract,
+
+    relationshipScore:
+        number
 ): number {
     let score =
-        0;
+        relationshipScore;
 
     const lowerPath =
         path.toLowerCase();

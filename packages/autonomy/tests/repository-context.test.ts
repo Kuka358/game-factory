@@ -153,6 +153,81 @@ describe(
             }
         );
 
+        it(
+            "prioritizes direct imports and reverse importers around hinted files",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    const discovery =
+                        new GitRepositoryContextDiscovery({
+                            maxSelectedFiles:
+                                4,
+
+                            maxInventoryEntries:
+                                20
+                        });
+
+
+                    const result =
+                        await discovery.discover({
+                            repositoryRoot:
+                                repository,
+
+                            contract:
+                                createContract()
+                        });
+
+
+                    expect(
+                        result.selectedPaths[0]
+                    ).toBe(
+                        "src/math.ts"
+                    );
+
+
+                    expect(
+                        result.selectedPaths
+                    ).toContain(
+                        "src/range.ts"
+                    );
+
+
+                    expect(
+                        result.selectedPaths
+                    ).toContain(
+                        "src/math.test.ts"
+                    );
+
+
+                    expect(
+                        result.selectedPaths
+                    ).toContain(
+                        "src/consumer.ts"
+                    );
+
+
+                    expect(
+                        result.selectedPaths
+                    ).not.toContain(
+                        "src/other.ts"
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
 
         it(
             "never exposes ignored or untracked files",
@@ -255,6 +330,139 @@ describe(
                         )
                     ).toBe(
                         false
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
+            "adds package boundary context for a hinted package source file",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    const discovery =
+                        new GitRepositoryContextDiscovery({
+                            maxSelectedFiles:
+                                4,
+
+                            maxInventoryEntries:
+                                30
+                        });
+
+
+                    const contract:
+                        IterationContract = {
+                            id:
+                                "package-context",
+
+                            objective:
+                                "Modify a feature inside a workspace package",
+
+                            rationale:
+                                "Package metadata and entrypoints provide architectural context",
+
+                            scope: {
+                                allowedPaths: [
+                                    "packages/feature/src/feature.ts"
+                                ],
+
+                                forbiddenPaths:
+                                    []
+                            },
+
+                            contextScope: {
+                                allowedPaths: [
+                                    "packages/**"
+                                ],
+
+                                forbiddenPaths:
+                                    []
+                            },
+
+                            changes: [
+                                {
+                                    description:
+                                        "Update the feature implementation",
+
+                                    filesHint: [
+                                        "packages/feature/src/feature.ts"
+                                    ]
+                                }
+                            ],
+
+                            acceptanceCriteria: [
+                                "Feature remains compatible with its package"
+                            ],
+
+                            verification:
+                                [],
+
+                            architecturalConstraints:
+                                [],
+
+                            maxLocalAttempts:
+                                1,
+
+                            escalation: {
+                                onRepeatedFailure:
+                                    true,
+
+                                onArchitectureConflict:
+                                    true,
+
+                                maxRepairRounds:
+                                    0
+                            }
+                        };
+
+
+                    const result =
+                        await discovery.discover({
+                            repositoryRoot:
+                                repository,
+
+                            contract
+                        });
+
+
+                    expect(
+                        result.selectedPaths[0]
+                    ).toBe(
+                        "packages/feature/src/feature.ts"
+                    );
+
+
+                    expect(
+                        result.selectedPaths
+                    ).toContain(
+                        "packages/feature/package.json"
+                    );
+
+
+                    expect(
+                        result.selectedPaths
+                    ).toContain(
+                        "packages/feature/src/index.ts"
+                    );
+
+
+                    expect(
+                        result.selectedPaths
+                    ).toContain(
+                        "packages/shared/package.json"
                     );
                 } finally {
                     await rm(
@@ -541,6 +749,33 @@ async function createRepository():
         }
     );
 
+    await mkdir(
+        join(
+            repository,
+            "packages",
+            "feature",
+            "src"
+        ),
+        {
+            recursive:
+                true
+        }
+    );
+
+
+    await mkdir(
+        join(
+            repository,
+            "packages",
+            "shared",
+            "src"
+        ),
+        {
+            recursive:
+                true
+        }
+    );
+
 
     await writeFile(
         join(
@@ -566,7 +801,44 @@ async function createRepository():
             "src",
             "math.ts"
         ),
-        "export const add = (a: number, b: number) => a + b;\n",
+        [
+            'import { range } from "./range.js";',
+            "",
+            "export const add =",
+            "    (a: number, b: number) =>",
+            "        a + b + range * 0;",
+            ""
+        ].join(
+            "\n"
+        ),
+        "utf8"
+    );
+
+    await writeFile(
+        join(
+            repository,
+            "src",
+            "range.ts"
+        ),
+        "export const range = 10;\n",
+        "utf8"
+    );
+
+
+    await writeFile(
+        join(
+            repository,
+            "src",
+            "consumer.ts"
+        ),
+        [
+            'import { add } from "./math.js";',
+            "",
+            "export const consumed = add(1, 2);",
+            ""
+        ].join(
+            "\n"
+        ),
         "utf8"
     );
 
@@ -643,6 +915,86 @@ async function createRepository():
         "utf8"
     );
 
+    await writeFile(
+        join(
+            repository,
+            "packages",
+            "feature",
+            "package.json"
+        ),
+        JSON.stringify(
+            {
+                name:
+                    "@fixture/feature",
+
+                dependencies: {
+                    "@fixture/shared":
+                        "workspace:*"
+                }
+            },
+            null,
+            2
+        ) + "\n",
+        "utf8"
+    );
+
+
+    await writeFile(
+        join(
+            repository,
+            "packages",
+            "feature",
+            "src",
+            "index.ts"
+        ),
+        'export * from "./feature.js";\n',
+        "utf8"
+    );
+
+
+    await writeFile(
+        join(
+            repository,
+            "packages",
+            "feature",
+            "src",
+            "feature.ts"
+        ),
+        "export const feature = true;\n",
+        "utf8"
+    );
+
+
+    await writeFile(
+        join(
+            repository,
+            "packages",
+            "shared",
+            "package.json"
+        ),
+        JSON.stringify(
+            {
+                name:
+                    "@fixture/shared"
+            },
+            null,
+            2
+        ) + "\n",
+        "utf8"
+    );
+
+
+    await writeFile(
+        join(
+            repository,
+            "packages",
+            "shared",
+            "src",
+            "index.ts"
+        ),
+        "export const shared = true;\n",
+        "utf8"
+    );
 
     await runGit(
         repository,

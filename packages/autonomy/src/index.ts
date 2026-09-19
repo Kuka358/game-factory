@@ -18,3 +18,4 @@ export * from "./verified-commit.js";
 export * from "./ai-coding-harness.js";
 export * from "./repository-context.js";
 export * from "./command-verifier.js";
+export * from "./repository-intelligence.js";

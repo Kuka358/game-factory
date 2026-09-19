@@ -11,8 +11,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-  "@game-factory/ai": "workspace:*"
-},
+    "@game-factory/ai": "workspace:*",
+    "typescript": "^5.9.3"
+  },
   "devDependencies": {
     "@types/node": "^26.2.0",
     "vitest": "^3"

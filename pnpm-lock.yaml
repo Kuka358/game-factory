@@ -165,6 +165,9 @@ importers:
       '@game-factory/ai':
         specifier: workspace:*
         version: link:../ai
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
     devDependencies:
       '@types/node':
         specifier: ^26.2.0
