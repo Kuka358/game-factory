@@ -26,9 +26,10 @@ import {
     normalizeRepositoryPath
 } from "./workspace.js";
 
-import type {
-    RepositoryContextDiscovery,
-    RepositoryContextSelection
+import {
+    isSensitiveContextPath,
+    type RepositoryContextDiscovery,
+    type RepositoryContextSelection
 } from "./repository-context.js";
 
 export interface AICodingHarnessOptions {
@@ -227,6 +228,14 @@ export class AICodingHarness
                 normalizeRepositoryPath(
                     rawPath
                 );
+
+            if (
+                isSensitiveContextPath(
+                    path
+                )
+            ) {
+                continue;
+            }
 
             const contextScope =
                 input.contract.contextScope ??

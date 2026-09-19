@@ -297,6 +297,151 @@ describe(
         );
 
         it(
+            "never exposes sensitive files hinted directly by the iteration contract",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    await writeFile(
+                        join(
+                            repository,
+                            ".env"
+                        ),
+                        "SUPER_SECRET=must-not-reach-model\n",
+                        "utf8"
+                    );
+
+
+                    let capturedRequest:
+                        AIRequest |
+                        undefined;
+
+
+                    const provider =
+                        createProvider(
+                            {
+                                summary:
+                                    "No changes required",
+
+                                edits:
+                                    []
+                            },
+
+                            request => {
+                                capturedRequest =
+                                    request;
+                            }
+                        );
+
+
+                    const sensitiveContract:
+                        IterationContract = {
+                        ...contract,
+
+                        scope: {
+                            allowedPaths: [
+                                ".env"
+                            ],
+
+                            forbiddenPaths:
+                                []
+                        },
+
+                        contextScope: {
+                            allowedPaths: [
+                                ".env"
+                            ],
+
+                            forbiddenPaths:
+                                []
+                        },
+
+                        changes: [
+                            {
+                                description:
+                                    "Inspect hinted file",
+
+                                filesHint: [
+                                    ".env"
+                                ]
+                            }
+                        ]
+                    };
+
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model"
+                        });
+
+
+                    await harness.executeIteration(
+                        createInput(
+                            repository,
+                            sensitiveContract
+                        )
+                    );
+
+
+                    const userMessage =
+                        capturedRequest
+                            ?.messages
+                            .find(
+                                message =>
+                                    message.role ===
+                                    "user"
+                            );
+
+
+                    if (
+                        !userMessage ||
+                        typeof userMessage.content !==
+                            "string"
+                    ) {
+                        throw new Error(
+                            "Expected string user prompt"
+                        );
+                    }
+
+
+                    const prompt =
+                        JSON.parse(
+                            userMessage.content
+                        );
+
+
+                    expect(
+                        prompt.repositoryFiles
+                    ).toEqual(
+                        []
+                    );
+
+
+                    expect(
+                        userMessage.content
+                    ).not.toContain(
+                        "SUPER_SECRET"
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
             "can read wider repository context without granting wider write permission",
             async () => {
                 const repository =

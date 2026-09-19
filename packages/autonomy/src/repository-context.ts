@@ -817,7 +817,7 @@ function isExecFileError(
         Error;
 }
 
-function isSensitiveContextPath(
+export function isSensitiveContextPath(
     path:
         string
 ): boolean {
