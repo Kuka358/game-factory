@@ -99,6 +99,10 @@ try {
         false;
 
 
+    let usageObserved =
+        false;
+
+
     const harness =
         new AICodingHarness({
             provider,
@@ -160,6 +164,16 @@ try {
 
 
                 console.log(
+                    `raw estimate:        ${report.rawEstimatedInputTokens}`
+                );
+
+
+                console.log(
+                    `estimate multiplier: ${report.estimateMultiplier.toFixed(3)}`
+                );
+
+
+                console.log(
                     `max input:           ${report.maxInputTokens}`
                 );
 
@@ -186,6 +200,101 @@ try {
 
                 console.log(
                     "===================="
+                );
+            },
+
+
+            contextUsageObserver(
+                observation
+            ) {
+                usageObserved =
+                    true;
+
+
+                console.log(
+                    "\nREAL MODEL TOKEN USAGE"
+                );
+
+
+                console.log(
+                    "======================"
+                );
+
+
+                console.log(
+                    `raw estimated input:  ${observation.rawEstimatedInputTokens}`
+                );
+
+
+                console.log(
+                    `actual prompt tokens: ${observation.actualInputTokens}`
+                );
+
+
+                console.log(
+                    `actual/raw ratio:     ${observation.actualToRawEstimateRatio.toFixed(3)}`
+                );
+
+
+                console.log(
+                    `previous multiplier:  ${observation.previousMultiplier.toFixed(3)}`
+                );
+
+
+                console.log(
+                    `next multiplier:      ${observation.nextMultiplier.toFixed(3)}`
+                );
+
+
+                console.log(
+                    "======================"
+                );
+            },
+
+            contextUsageObserver(
+                observation
+            ) {
+                usageObserved =
+                    true;
+
+
+                console.log(
+                    "\nREAL MODEL TOKEN USAGE"
+                );
+
+
+                console.log(
+                    "======================"
+                );
+
+
+                console.log(
+                    `raw estimated input:  ${observation.rawEstimatedInputTokens}`
+                );
+
+
+                console.log(
+                    `actual prompt tokens: ${observation.actualInputTokens}`
+                );
+
+
+                console.log(
+                    `actual/raw ratio:     ${observation.actualToRawEstimateRatio.toFixed(3)}`
+                );
+
+
+                console.log(
+                    `previous multiplier:  ${observation.previousMultiplier.toFixed(3)}`
+                );
+
+
+                console.log(
+                    `next multiplier:      ${observation.nextMultiplier.toFixed(3)}`
+                );
+
+
+                console.log(
+                    "======================"
                 );
             }
         });
@@ -268,6 +377,19 @@ try {
     ) {
         throw new Error(
             "Context budget observer was not called"
+        );
+    }
+
+    if (
+        !usageObserved
+    ) {
+        throw new Error(
+            [
+                "LM Studio response did not expose prompt token usage.",
+                "Cannot calibrate model context estimates."
+            ].join(
+                " "
+            )
         );
     }
 

@@ -5,6 +5,184 @@ export interface TokenEstimator {
     ): number;
 }
 
+export interface TokenEstimateCalibrationObservation {
+    rawEstimatedInputTokens:
+        number;
+
+    actualInputTokens:
+        number;
+
+    actualToRawEstimateRatio:
+        number;
+
+    previousMultiplier:
+        number;
+
+    nextMultiplier:
+        number;
+}
+
+
+export interface TokenEstimateCalibration {
+    readonly currentMultiplier:
+        number;
+
+    apply(
+        rawEstimatedTokens:
+            number
+    ): number;
+
+    observe(
+        rawEstimatedTokens:
+            number,
+
+        actualTokens:
+            number
+    ): TokenEstimateCalibrationObservation;
+}
+
+
+export interface AdaptiveTokenEstimateCalibrationOptions {
+    /**
+     * Extra protection applied on top of an observed
+     * actual/estimated ratio.
+     *
+     * 1.10 means keep another 10% safety margin after calibration.
+     */
+    headroomFactor?:
+        number;
+
+    /**
+     * Prevent one anomalous provider usage result from making
+     * every later prompt unusably conservative.
+     */
+    maxMultiplier?:
+        number;
+}
+
+
+export class AdaptiveTokenEstimateCalibration
+    implements TokenEstimateCalibration
+{
+    private multiplier =
+        1;
+
+    private readonly headroomFactor:
+        number;
+
+    private readonly maxMultiplier:
+        number;
+
+
+    constructor(
+        options:
+            AdaptiveTokenEstimateCalibrationOptions = {}
+    ) {
+        this.headroomFactor =
+            numberAtLeastOne(
+                options.headroomFactor ??
+                    1.10,
+                "headroomFactor"
+            );
+
+
+        this.maxMultiplier =
+            numberAtLeastOne(
+                options.maxMultiplier ??
+                    2,
+                "maxMultiplier"
+            );
+    }
+
+
+    get currentMultiplier():
+        number
+    {
+        return this.multiplier;
+    }
+
+
+    apply(
+        rawEstimatedTokens:
+            number
+    ): number {
+        const tokens =
+            nonNegativeInteger(
+                rawEstimatedTokens,
+                "rawEstimatedTokens"
+            );
+
+
+        return ceilTokenEstimate(
+            tokens *
+            this.multiplier
+        );
+    }
+
+
+    observe(
+        rawEstimatedTokens:
+            number,
+
+        actualTokens:
+            number
+    ): TokenEstimateCalibrationObservation {
+        const estimated =
+            positiveInteger(
+                rawEstimatedTokens,
+                "rawEstimatedTokens"
+            );
+
+
+        const actual =
+            positiveInteger(
+                actualTokens,
+                "actualTokens"
+            );
+
+
+        const previousMultiplier =
+            this.multiplier;
+
+
+        const actualToRawEstimateRatio =
+            actual /
+            estimated;
+
+
+        const observedMultiplier =
+            actualToRawEstimateRatio *
+            this.headroomFactor;
+
+
+        this.multiplier =
+            Math.min(
+                this.maxMultiplier,
+
+                Math.max(
+                    previousMultiplier,
+                    1,
+                    observedMultiplier
+                )
+            );
+
+
+        return {
+            rawEstimatedInputTokens:
+                estimated,
+
+            actualInputTokens:
+                actual,
+
+            actualToRawEstimateRatio,
+
+            previousMultiplier,
+
+            nextMultiplier:
+                this.multiplier
+        };
+    }
+}
 
 export interface ModelContextProfile {
     contextWindowTokens:
@@ -82,6 +260,12 @@ export interface ModelContextBudgetReport {
         number;
 
     skippedInventoryCount:
+        number;
+
+    rawEstimatedInputTokens:
+        number;
+
+    estimateMultiplier:
         number;
 }
 
@@ -289,4 +473,62 @@ function nonNegativeInteger(
 
 
     return value;
+}
+
+function numberAtLeastOne(
+    value:
+        number,
+
+    name:
+        string
+): number {
+    if (
+        !Number.isFinite(
+            value
+        ) ||
+        value <
+            1
+    ) {
+        throw new Error(
+            `${name} must be a finite number greater than or equal to 1`
+        );
+    }
+
+
+    return value;
+}
+
+function ceilTokenEstimate(
+    value:
+        number
+): number {
+    /*
+     * Floating-point arithmetic can turn an exact mathematical
+     * integer such as:
+     *
+     *   100 * 1.43
+     *
+     * into:
+     *
+     *   143.00000000000003
+     *
+     * A raw Math.ceil() would incorrectly reserve one additional
+     * token. Remove only machine-precision noise before rounding
+     * upward; meaningful fractional estimates still round up.
+     */
+    const tolerance =
+        Number.EPSILON *
+        Math.max(
+            1,
+            Math.abs(
+                value
+            )
+        ) *
+        8;
+
+
+    return Math.ceil(
+        value -
+        tolerance
+    );
 }

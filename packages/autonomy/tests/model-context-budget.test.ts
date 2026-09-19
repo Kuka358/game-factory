@@ -5,6 +5,7 @@ import {
 } from "vitest";
 
 import {
+    AdaptiveTokenEstimateCalibration,
     ConservativeUtf8TokenEstimator,
     createModelContextBudget,
     estimateModelInputTokens
@@ -52,6 +53,106 @@ describe(
             }
         );
 
+        it(
+            "only increases token estimates when real provider usage proves underestimation",
+            () => {
+                const calibration =
+                    new AdaptiveTokenEstimateCalibration({
+                        headroomFactor:
+                            1.10,
+
+                        maxMultiplier:
+                            2
+                    });
+
+
+                expect(
+                    calibration.currentMultiplier
+                ).toBe(
+                    1
+                );
+
+
+                const first =
+                    calibration.observe(
+                        100,
+                        130
+                    );
+
+
+                expect(
+                    first.actualToRawEstimateRatio
+                ).toBeCloseTo(
+                    1.3
+                );
+
+
+                expect(
+                    first.previousMultiplier
+                ).toBe(
+                    1
+                );
+
+
+                expect(
+                    first.nextMultiplier
+                ).toBeCloseTo(
+                    1.43
+                );
+
+
+                expect(
+                    calibration.apply(
+                        100
+                    )
+                ).toBe(
+                    143
+                );
+
+
+                /*
+                 * A later lower ratio must never reduce protection.
+                 */
+                const second =
+                    calibration.observe(
+                        100,
+                        90
+                    );
+
+
+                expect(
+                    second.nextMultiplier
+                ).toBeCloseTo(
+                    1.43
+                );
+
+
+                /*
+                 * Extreme observations are bounded.
+                 */
+                const third =
+                    calibration.observe(
+                        100,
+                        1_000
+                    );
+
+
+                expect(
+                    third.nextMultiplier
+                ).toBe(
+                    2
+                );
+
+
+                expect(
+                    calibration.apply(
+                        100
+                    )
+                ).toBe(
+                    200
+                );
+            }
+        );
 
         it(
             "reserves output and safety margin from the context window",

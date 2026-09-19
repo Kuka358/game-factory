@@ -1091,6 +1091,218 @@ describe(
             }
         );
 
+        it(
+            "uses real provider token usage to calibrate later context estimates",
+            async () => {
+                const repository =
+                    await createRepository();
+
+
+                try {
+                    const reports:
+                        Array<{
+                            rawEstimatedInputTokens:
+                                number;
+
+                            estimateMultiplier:
+                                number;
+
+                            estimatedInputTokens:
+                                number;
+                        }> = [];
+
+
+                    const observations:
+                        Array<{
+                            previousMultiplier:
+                                number;
+
+                            nextMultiplier:
+                                number;
+                        }> = [];
+
+
+                    const provider:
+                        AIProvider = {
+                            id:
+                                "usage-aware-fake",
+
+                            async generate<T>(
+                                request:
+                                    AIRequest
+                            ) {
+                                return {
+                                    data: {
+                                        summary:
+                                            "No changes",
+
+                                        edits:
+                                            []
+                                    } as T,
+
+                                    provider:
+                                        "usage-aware-fake",
+
+                                    model:
+                                        request.model,
+
+                                    usage: {
+                                        inputTokens:
+                                            60,
+
+                                        outputTokens:
+                                            5,
+
+                                        totalTokens:
+                                            65
+                                    }
+                                };
+                            }
+                        };
+
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model",
+
+                            maxTokens:
+                                10,
+
+                            modelContext: {
+                                contextWindowTokens:
+                                    200,
+
+                                safetyMarginTokens:
+                                    0,
+
+                                requestOverheadTokens:
+                                    0
+                            },
+
+                            /*
+                             * Three estimated prompt components:
+                             * system + user + schema = 30 raw tokens.
+                             */
+                            tokenEstimator: {
+                                estimateTokens() {
+                                    return 10;
+                                }
+                            },
+
+                            contextBudgetObserver(
+                                report
+                            ) {
+                                reports.push({
+                                    rawEstimatedInputTokens:
+                                        report.rawEstimatedInputTokens,
+
+                                    estimateMultiplier:
+                                        report.estimateMultiplier,
+
+                                    estimatedInputTokens:
+                                        report.estimatedInputTokens
+                                });
+                            },
+
+                            contextUsageObserver(
+                                observation
+                            ) {
+                                observations.push({
+                                    previousMultiplier:
+                                        observation.previousMultiplier,
+
+                                    nextMultiplier:
+                                        observation.nextMultiplier
+                                });
+                            }
+                        });
+
+
+                    await harness.executeIteration(
+                        createInput(
+                            repository
+                        )
+                    );
+
+
+                    await harness.executeIteration({
+                        ...createInput(
+                            repository
+                        ),
+
+                        attempt:
+                            2
+                    });
+
+
+                    expect(
+                        reports
+                    ).toHaveLength(
+                        2
+                    );
+
+
+                    expect(
+                        reports[0]
+                            ?.rawEstimatedInputTokens
+                    ).toBe(
+                        30
+                    );
+
+
+                    expect(
+                        reports[0]
+                            ?.estimateMultiplier
+                    ).toBe(
+                        1
+                    );
+
+
+                    /*
+                     * actual/raw = 60/30 = 2.
+                     * Default headroom would request 2.2, but the
+                     * calibration default max multiplier is 2.
+                     */
+                    expect(
+                        observations[0]
+                            ?.nextMultiplier
+                    ).toBe(
+                        2
+                    );
+
+
+                    expect(
+                        reports[1]
+                            ?.estimateMultiplier
+                    ).toBe(
+                        2
+                    );
+
+
+                    expect(
+                        reports[1]
+                            ?.estimatedInputTokens
+                    ).toBe(
+                        60
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
 
         it(
             "applies scoped delete edits",

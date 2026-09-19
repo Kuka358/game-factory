@@ -33,12 +33,15 @@ import {
 } from "./repository-context.js";
 
 import {
+    AdaptiveTokenEstimateCalibration,
     ConservativeUtf8TokenEstimator,
     createModelContextBudget,
     estimateModelInputTokens,
     type ModelContextBudget,
     type ModelContextBudgetReport,
     type ModelContextProfile,
+    type TokenEstimateCalibration,
+    type TokenEstimateCalibrationObservation,
     type TokenEstimator
 } from "./model-context-budget.js";
 
@@ -74,6 +77,15 @@ export interface AICodingHarnessOptions {
         (
             report:
                 ModelContextBudgetReport
+        ) => void;
+
+    tokenCalibration?:
+        TokenEstimateCalibration;
+
+    contextUsageObserver?:
+        (
+            observation:
+                TokenEstimateCalibrationObservation
         ) => void;
 }
 
@@ -142,6 +154,9 @@ export class AICodingHarness
     private readonly modelContextBudget?:
         ModelContextBudget;
 
+    private readonly tokenCalibration:
+        TokenEstimateCalibration;
+
     constructor(
         private readonly options:
             AICodingHarnessOptions
@@ -182,6 +197,10 @@ export class AICodingHarness
                     this.maxTokens
                 )
                 : undefined;
+
+        this.tokenCalibration =
+            options.tokenCalibration ??
+            new AdaptiveTokenEstimateCalibration();
     }
 
 
@@ -277,6 +296,37 @@ export class AICodingHarness
                             responseSchema
                     }
                 });
+
+        const actualInputTokens =
+            response.usage
+                ?.inputTokens;
+
+
+        if (
+            promptContext.report &&
+            typeof actualInputTokens ===
+                "number" &&
+            Number.isInteger(
+                actualInputTokens
+            ) &&
+            actualInputTokens >
+                0
+        ) {
+            const observation =
+                this.tokenCalibration
+                    .observe(
+                        promptContext.report
+                            .rawEstimatedInputTokens,
+
+                        actualInputTokens
+                    );
+
+
+            this.options
+                .contextUsageObserver?.(
+                    observation
+                );
+        }
 
         const result =
             validateResponse(
@@ -647,8 +697,8 @@ export class AICodingHarness
         }
 
 
-        const estimatedInputTokens =
-            this.estimateInputTokens(
+        const rawEstimatedInputTokens =
+            this.estimateRawInputTokens(
                 budget,
                 input,
                 selectedFiles,
@@ -656,6 +706,13 @@ export class AICodingHarness
                 systemPrompt,
                 responseSchema
             );
+
+
+        const estimatedInputTokens =
+            this.tokenCalibration
+                .apply(
+                    rawEstimatedInputTokens
+                );
 
 
         return {
@@ -681,6 +738,12 @@ export class AICodingHarness
                 maxInputTokens:
                     budget.maxInputTokens,
 
+                rawEstimatedInputTokens,
+
+                estimateMultiplier:
+                    this.tokenCalibration
+                        .currentMultiplier,
+
                 estimatedInputTokens,
 
                 remainingHeadroomTokens:
@@ -705,7 +768,7 @@ export class AICodingHarness
     }
 
 
-    private estimateInputTokens(
+    private estimateRawInputTokens(
         budget:
             ModelContextBudget,
 
@@ -741,6 +804,43 @@ export class AICodingHarness
 
             responseSchema
         });
+    }
+
+
+    private estimateInputTokens(
+        budget:
+            ModelContextBudget,
+
+        input:
+            CodingHarnessInput,
+
+        files:
+            readonly RepositoryContextFile[],
+
+        inventory:
+            readonly string[],
+
+        systemPrompt:
+            string,
+
+        responseSchema:
+            Record<string, unknown>
+    ): number {
+        const rawEstimate =
+            this.estimateRawInputTokens(
+                budget,
+                input,
+                files,
+                inventory,
+                systemPrompt,
+                responseSchema
+            );
+
+
+        return this.tokenCalibration
+            .apply(
+                rawEstimate
+            );
     }
 
 
