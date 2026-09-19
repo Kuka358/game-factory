@@ -250,6 +250,44 @@ function verifyStructure(
         );
 
 
+    /*
+     * PlatformerLevelGenerator still uses ARCADE_GRAVITY_Y
+     * inside calculateMaximumSafeHorizontalGap().
+     *
+     * The refactor may either preserve the existing local
+     * re-export import or import the constant directly from
+     * @game-factory/runtime, but the binding must not disappear.
+     */
+    const hasGravityImport =
+        hasNamedImport(
+            generatorFile,
+            "@game-factory/runtime",
+            "ARCADE_GRAVITY_Y"
+        ) ||
+        hasNamedImport(
+            generatorFile,
+            "../../physics.js",
+            "ARCADE_GRAVITY_Y"
+        );
+
+
+    if (!hasGravityImport) {
+        throw new Error(
+            [
+                "PlatformerLevelGenerator.ts must preserve",
+                "an ARCADE_GRAVITY_Y import because",
+                "calculateMaximumSafeHorizontalGap still uses it"
+            ].join(
+                " "
+            )
+        );
+    }
+
+
+    /*
+     * The shared helper is the architectural purpose
+     * of this dogfood refactor.
+     */
     if (
         !hasExportedFunction(
             runtimeFile,
@@ -267,6 +305,10 @@ function verifyStructure(
     }
 
 
+    /*
+     * Hazard clearance must use the shared helper for
+     * the theoretical ideal jump rise.
+     */
     if (
         !hasNamedImport(
             hazardFile,
@@ -298,6 +340,10 @@ function verifyStructure(
     }
 
 
+    /*
+     * PlatformerLevelGenerator must also use the shared
+     * helper in calculateMaximumSafeRise().
+     */
     if (
         !hasNamedImport(
             generatorFile,
@@ -327,6 +373,43 @@ function verifyStructure(
             "PlatformerLevelGenerator.ts must use calculateArcadeJumpHeight()"
         );
     }
+
+
+    /*
+     * Avoid accepting full-file rewrites that accidentally
+     * remove the final newline.
+     */
+    for (
+        const [
+            fileName,
+            source
+        ] of [
+            [
+                runtimeFileName,
+                runtimeSource
+            ],
+
+            [
+                hazardFileName,
+                hazardSource
+            ],
+
+            [
+                generatorFileName,
+                generatorSource
+            ]
+        ]
+    ) {
+        if (
+            !source.endsWith(
+                "\n"
+            )
+        ) {
+            throw new Error(
+                `${fileName} must end with a newline`
+            );
+        }
+    }
 }
 
 
@@ -344,6 +427,10 @@ function verifyRuntime(
         );
 
 
+    /*
+     * Shared runtime constants must not change as part
+     * of this refactor.
+     */
     assertEqual(
         runtime.ARCADE_GRAVITY_Y,
         1200,
@@ -397,6 +484,13 @@ function verifyRuntime(
         runtime.calculateArcadeJumpHeight;
 
 
+    /*
+     * Baseline intentionally does not have this function yet.
+     *
+     * Structure verification is responsible for requiring it
+     * after the refactor. If present, runtime verification
+     * validates its actual behaviour.
+     */
     if (
         typeof calculateArcadeJumpHeight ===
         "function"
@@ -433,6 +527,11 @@ function verifyRuntime(
     }
 
 
+    /*
+     * Execute the real hazard helper against the runtime
+     * fixture and confirm that refactoring the theoretical
+     * jump height does not alter gameplay behaviour.
+     */
     const hazard =
         evaluateCommonJs(
             hazardSource,
@@ -496,6 +595,17 @@ function verifyRuntime(
     );
 
 
+    /*
+     * calculateMaximumSafeRise() is private, so extract only
+     * that function and evaluate it in an isolated fixture.
+     *
+     * Before the refactor the function uses ARCADE_GRAVITY_Y
+     * directly. After the refactor it should use
+     * calculateArcadeJumpHeight().
+     *
+     * Supplying both globals makes the runtime verifier valid
+     * for both the baseline and the refactored implementation.
+     */
     const safeRise =
         evaluatePrivateFunction(
             generatorFileName,
@@ -754,6 +864,11 @@ function evaluatePrivateFunction(
     };
 
 
+    /*
+     * Functional fixture isolation only.
+     *
+     * node:vm is not a production security boundary.
+     */
     vm.runInNewContext(
         transpiled.outputText,
         sandbox,
@@ -848,6 +963,7 @@ function evaluateCommonJs(
 
     /*
      * Functional fixture isolation only.
+     *
      * node:vm is not a production security boundary.
      */
     vm.runInNewContext(
