@@ -25,3 +25,4 @@ export * from "./docker-execution-sandbox.js";
 export * from "./model-context-budget.js";
 export * from "./model-context-profiles.js";
 export * from "./surgical-edit.js";
+export * from "./surgical-edit-filesystem.js";

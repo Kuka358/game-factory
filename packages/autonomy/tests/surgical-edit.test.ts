@@ -433,6 +433,43 @@ describe(
             }
         );
 
+        it(
+            "rejects replacing the complete existing file",
+            () => {
+                expect(
+                    () =>
+                        planSurgicalEdits(
+                            [
+                                {
+                                    path:
+                                        "src/value.ts",
+
+                                    content:
+                                        "const value = 1;\n"
+                                }
+                            ],
+
+                            [
+                                {
+                                    operation:
+                                        "replace",
+
+                                    path:
+                                        "src/value.ts",
+
+                                    oldText:
+                                        "const value = 1;\n",
+
+                                    newText:
+                                        "const value = 2;\n"
+                                }
+                            ]
+                        )
+                ).toThrow(
+                    "must not replace the complete existing file"
+                );
+            }
+        );
 
         it(
             "does not allow delete then create to bypass surgical replacement",

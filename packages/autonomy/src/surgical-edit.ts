@@ -278,6 +278,15 @@ export function planSurgicalEdits(
                     );
                 }
 
+                if (
+                    edit.oldText ===
+                    state.currentContent
+                ) {
+                    throw new Error(
+                        `Surgical replace must not replace the complete existing file: ${path}`
+                    );
+                }
+
 
                 const occurrences =
                     countOccurrences(
