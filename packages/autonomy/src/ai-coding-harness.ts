@@ -37,6 +37,7 @@ import {
     createModelContextBudget,
     estimateModelInputTokens,
     type ModelContextBudget,
+    type ModelContextBudgetReport,
     type ModelContextProfile,
     type TokenEstimator
 } from "./model-context-budget.js";
@@ -68,6 +69,12 @@ export interface AICodingHarnessOptions {
 
     tokenEstimator?:
         TokenEstimator;
+
+    contextBudgetObserver?:
+        (
+            report:
+                ModelContextBudgetReport
+        ) => void;
 }
 
 
@@ -211,6 +218,15 @@ export class AICodingHarness
                 systemPrompt,
                 responseSchema
             );
+
+        if (
+            promptContext.report
+        ) {
+            this.options
+                .contextBudgetObserver?.(
+                    promptContext.report
+                );
+        }
 
 
         const userPrompt =
@@ -425,6 +441,9 @@ export class AICodingHarness
 
         inventory:
             readonly string[];
+
+        report?:
+            ModelContextBudgetReport;
     } {
         const budget =
             this.modelContextBudget;
@@ -628,12 +647,60 @@ export class AICodingHarness
         }
 
 
+        const estimatedInputTokens =
+            this.estimateInputTokens(
+                budget,
+                input,
+                selectedFiles,
+                selectedInventory,
+                systemPrompt,
+                responseSchema
+            );
+
+
         return {
             files:
                 selectedFiles,
 
             inventory:
-                selectedInventory
+                selectedInventory,
+
+            report: {
+                contextWindowTokens:
+                    budget.contextWindowTokens,
+
+                reservedOutputTokens:
+                    budget.reservedOutputTokens,
+
+                safetyMarginTokens:
+                    budget.safetyMarginTokens,
+
+                requestOverheadTokens:
+                    budget.requestOverheadTokens,
+
+                maxInputTokens:
+                    budget.maxInputTokens,
+
+                estimatedInputTokens,
+
+                remainingHeadroomTokens:
+                    budget.maxInputTokens -
+                    estimatedInputTokens,
+
+                selectedFileCount:
+                    selectedFiles.length,
+
+                skippedFileCount:
+                    files.length -
+                    selectedFiles.length,
+
+                selectedInventoryCount:
+                    selectedInventory.length,
+
+                skippedInventoryCount:
+                    inventory.length -
+                    selectedInventory.length
+            }
         };
     }
 

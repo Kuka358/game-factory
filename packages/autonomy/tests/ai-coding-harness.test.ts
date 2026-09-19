@@ -932,6 +932,165 @@ describe(
             }
         );
 
+        it(
+            "reports the final model context budget decision",
+            async () => {
+                const repository =
+                    await createRepository();
+
+
+                try {
+                    let observedReport:
+                        {
+                            contextWindowTokens:
+                                number;
+
+                            reservedOutputTokens:
+                                number;
+
+                            maxInputTokens:
+                                number;
+
+                            estimatedInputTokens:
+                                number;
+
+                            remainingHeadroomTokens:
+                                number;
+
+                            selectedFileCount:
+                                number;
+
+                            skippedFileCount:
+                                number;
+                        } |
+                        undefined;
+
+
+                    const provider =
+                        createProvider({
+                            summary:
+                                "Observed budget",
+
+                            edits:
+                                []
+                        });
+
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model",
+
+                            maxTokens:
+                                20,
+
+                            modelContext: {
+                                contextWindowTokens:
+                                    200,
+
+                                safetyMarginTokens:
+                                    10,
+
+                                requestOverheadTokens:
+                                    5
+                            },
+
+                            tokenEstimator: {
+                                estimateTokens(
+                                    text:
+                                        string
+                                ) {
+                                    return Math.ceil(
+                                        text.length /
+                                        20
+                                    );
+                                }
+                            },
+
+                            contextBudgetObserver(
+                                report
+                            ) {
+                                observedReport =
+                                    report;
+                            }
+                        });
+
+
+                    await harness.executeIteration(
+                        createInput(
+                            repository
+                        )
+                    );
+
+
+                    expect(
+                        observedReport
+                    ).toBeDefined();
+
+
+                    expect(
+                        observedReport
+                            ?.contextWindowTokens
+                    ).toBe(
+                        200
+                    );
+
+
+                    expect(
+                        observedReport
+                            ?.reservedOutputTokens
+                    ).toBe(
+                        20
+                    );
+
+
+                    expect(
+                        observedReport
+                            ?.maxInputTokens
+                    ).toBe(
+                        170
+                    );
+
+
+                    expect(
+                        observedReport
+                            ?.estimatedInputTokens
+                    ).toBeGreaterThan(
+                        0
+                    );
+
+
+                    expect(
+                        observedReport
+                            ?.remainingHeadroomTokens
+                    ).toBeGreaterThanOrEqual(
+                        0
+                    );
+
+
+                    expect(
+                        observedReport
+                            ?.selectedFileCount
+                    ).toBeGreaterThanOrEqual(
+                        1
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
 
         it(
             "applies scoped delete edits",

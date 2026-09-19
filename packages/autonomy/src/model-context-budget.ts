@@ -50,6 +50,41 @@ export interface ModelContextBudget {
         number;
 }
 
+export interface ModelContextBudgetReport {
+    contextWindowTokens:
+        number;
+
+    reservedOutputTokens:
+        number;
+
+    safetyMarginTokens:
+        number;
+
+    requestOverheadTokens:
+        number;
+
+    maxInputTokens:
+        number;
+
+    estimatedInputTokens:
+        number;
+
+    remainingHeadroomTokens:
+        number;
+
+    selectedFileCount:
+        number;
+
+    skippedFileCount:
+        number;
+
+    selectedInventoryCount:
+        number;
+
+    skippedInventoryCount:
+        number;
+}
+
 
 export interface ModelInputTokenEstimateInput {
     budget:
