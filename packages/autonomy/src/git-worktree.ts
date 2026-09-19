@@ -149,14 +149,27 @@ export class GitWorktreeManager {
 
         const id =
             [
-                sanitizeSegment(
-                    runId
+                compactSegment(
+                    runId,
+                    24
                 ),
-                sanitizeSegment(
-                    iterationId
+
+                compactSegment(
+                    iterationId,
+                    24
                 ),
-                `attempt-${attempt}`,
+
+                `a${attempt}`,
+
                 randomUUID()
+                    .replaceAll(
+                        "-",
+                        ""
+                    )
+                    .slice(
+                        0,
+                        12
+                    )
             ].join(
                 "-"
             );
@@ -1012,6 +1025,74 @@ function deduplicatePaths(
             paths
         )
     ];
+}
+
+function compactSegment(
+    value:
+        string,
+
+    maxLength:
+        number
+): string {
+    if (
+        !Number.isInteger(
+            maxLength
+        ) ||
+        maxLength <
+            10
+    ) {
+        throw new Error(
+            "compactSegment maxLength must be an integer >= 10"
+        );
+    }
+
+
+    const sanitized =
+        sanitizeSegment(
+            value
+        );
+
+
+    if (
+        sanitized.length <=
+        maxLength
+    ) {
+        return sanitized;
+    }
+
+
+    const digest =
+        createHash(
+            "sha256"
+        )
+            .update(
+                value
+            )
+            .digest(
+                "hex"
+            )
+            .slice(
+                0,
+                8
+            );
+
+
+    const prefixLength =
+        maxLength -
+        digest.length -
+        1;
+
+
+    return [
+        sanitized.slice(
+            0,
+            prefixLength
+        ),
+
+        digest
+    ].join(
+        "-"
+    );
 }
 
 

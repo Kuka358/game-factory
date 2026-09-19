@@ -714,6 +714,83 @@ describe(
         );
 
         it(
+            "bounds worktree path length for long run and iteration identifiers",
+            async () => {
+                const repository =
+                    await createRepository();
+
+                try {
+                    const manager =
+                        new GitWorktreeManager({
+                            repositoryRoot:
+                                repository
+                        });
+
+
+                    const worktree =
+                        await manager.create(
+                            [
+                                "real-autonomous-run",
+                                "with-an-extremely-long-human-readable-identifier",
+                                "that-must-not-expand-the-filesystem-path-indefinitely",
+                                "1234567890"
+                            ].join(
+                                "-"
+                            ),
+
+                            [
+                                "real-production-iteration",
+                                "with-another-extremely-long-descriptive-name",
+                                "used-by-the-autonomous-planner",
+                                "abcdefghij"
+                            ].join(
+                                "-"
+                            ),
+
+                            1
+                        );
+
+
+                    expect(
+                        worktree.id.length
+                    ).toBeLessThanOrEqual(
+                        70
+                    );
+
+
+                    expect(
+                        await readFile(
+                            join(
+                                worktree.path,
+                                "src",
+                                "main.txt"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        "original\n"
+                    );
+
+
+                    await manager.remove(
+                        worktree
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
             "allows verified promotion to be replayed after interruption",
             async () => {
                 const repository =
