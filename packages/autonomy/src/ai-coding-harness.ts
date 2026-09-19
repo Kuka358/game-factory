@@ -624,7 +624,11 @@ function createSystemPrompt():
         '- operation=\"delete\" with content=\"\".',
         "",
         "Prefer minimal changes.",
-        "Do not invent unrelated refactors."
+        "Do not invent unrelated refactors.",
+        "",
+        "When attempt is greater than 1, previousVerification is authoritative repair feedback.",
+        "Repository files contain the current state of the same isolated worktree, including edits from prior failed attempts.",
+        "Fix the reported verification failures without discarding unrelated correct work."
     ].join(
         "\n"
     );

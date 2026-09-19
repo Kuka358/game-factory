@@ -1067,9 +1067,54 @@ describe(
 
                 const worker:
                     CodingWorker = {
-                        async execute() {
+                        async execute(
+                            input
+                        ) {
                             workerAttempts +=
                                 1;
+
+                            if (
+                                input.attempt ===
+                                1
+                            ) {
+                                expect(
+                                    input.previousVerification
+                                ).toBeUndefined();
+
+                                expect(
+                                    input.repairInstructions
+                                ).toBeUndefined();
+                            } else {
+                                expect(
+                                    input.previousVerification
+                                        ?.passed
+                                ).toBe(
+                                    false
+                                );
+
+                                expect(
+                                    input.previousVerification
+                                        ?.checks[0]
+                                        ?.id
+                                ).toBe(
+                                    "typecheck"
+                                );
+
+                                expect(
+                                    input.previousVerification
+                                        ?.checks[0]
+                                        ?.stderr
+                                ).toContain(
+                                    "TS2322"
+                                );
+
+                                /*
+                                * This is a local retry, not an escalation repair.
+                                */
+                                expect(
+                                    input.repairInstructions
+                                ).toBeUndefined();
+                            }
 
                             return {
                                 summary:
@@ -1086,13 +1131,54 @@ describe(
                         async verify(
                             input
                         ) {
+                            if (
+                                input.attempt ===
+                                1
+                            ) {
+                                return {
+                                    passed:
+                                        false,
+
+                                    checks: [
+                                        {
+                                            id:
+                                                "typecheck",
+
+                                            command:
+                                                "pnpm typecheck",
+
+                                            passed:
+                                                false,
+
+                                            exitCode:
+                                                2,
+
+                                            stderr:
+                                                "TS2322: Type 'string' is not assignable to type 'number'."
+                                        }
+                                    ]
+                                };
+                            }
+
                             return {
                                 passed:
-                                    input.attempt ===
-                                    2,
+                                    true,
 
-                                checks:
-                                    []
+                                checks: [
+                                    {
+                                        id:
+                                            "typecheck",
+
+                                        command:
+                                            "pnpm typecheck",
+
+                                        passed:
+                                            true,
+
+                                        exitCode:
+                                            0
+                                    }
+                                ]
                             };
                         }
                     };

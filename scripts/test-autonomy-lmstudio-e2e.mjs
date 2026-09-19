@@ -64,6 +64,30 @@ const fixtureVerifierPath =
         "verify-autonomy-math-fixture.mjs"
     );
 
+const repairMode =
+    process.argv.includes(
+        "--repair"
+    );
+
+const unknownArguments =
+    process.argv
+        .slice(
+            2
+        )
+        .filter(
+            argument =>
+                argument !==
+                "--repair"
+        );
+
+if (
+    unknownArguments.length >
+    0
+) {
+    throw new Error(
+        `Unknown arguments: ${unknownArguments.join(", ")}`
+    );
+}
 
 const baseUrl =
     process.env.LM_STUDIO_BASE_URL ??
@@ -128,6 +152,15 @@ try {
 
     let contextObserved =
         false;
+
+    let repairPromptObserved =
+        false;
+
+    let injectedFaults =
+        0;
+
+    let failureAdvisorCalls =
+        0;
 
 
     const observedProvider = {
@@ -289,9 +322,176 @@ try {
             );
 
 
-            return provider.generate(
-                request
-            );
+            if (
+                repairMode &&
+                prompt.attempt ===
+                    1 &&
+                prompt.previousVerification !==
+                    null
+            ) {
+                throw new Error(
+                    "First repair E2E attempt unexpectedly contains previousVerification"
+                );
+            }
+
+
+            if (
+                repairMode &&
+                prompt.attempt ===
+                    2
+            ) {
+                const previousVerification =
+                    prompt.previousVerification;
+
+                if (
+                    !previousVerification ||
+                    previousVerification.passed !==
+                        false
+                ) {
+                    throw new Error(
+                        "Repair attempt did not receive failed previousVerification"
+                    );
+                }
+
+
+                const failedRuntime =
+                    previousVerification
+                        .checks
+                        ?.find(
+                            check =>
+                                check.id ===
+                                "runtime" &&
+                                check.passed ===
+                                false
+                        );
+
+                if (!failedRuntime) {
+                    throw new Error(
+                        "Repair attempt did not receive the failed runtime verifier result"
+                    );
+                }
+
+
+                if (
+                    !String(
+                        failedRuntime.stderr ??
+                        ""
+                    ).includes(
+                        "expected 0"
+                    )
+                ) {
+                    throw new Error(
+                        "Repair attempt did not receive useful runtime diagnostics"
+                    );
+                }
+
+
+                const mathFile =
+                    repositoryFiles.find(
+                        file =>
+                            file.path ===
+                            "src/math.ts"
+                    );
+
+                if (
+                    !mathFile ||
+                    typeof mathFile.content !==
+                        "string" ||
+                    !mathFile.content.includes(
+                        "__GAME_FACTORY_REPAIR_FAULT__"
+                    )
+                ) {
+                    throw new Error(
+                        "Repair attempt did not receive the failed workspace contents"
+                    );
+                }
+
+
+                if (
+                    !Array.isArray(
+                        prompt.repairInstructions
+                    ) ||
+                    prompt.repairInstructions
+                        .length !==
+                        0
+                ) {
+                    throw new Error(
+                        "Local repair unexpectedly received escalation repair instructions"
+                    );
+                }
+
+
+                repairPromptObserved =
+                    true;
+
+                console.log(
+                    "\nPASS repair prompt contains previous verifier failure and failed worktree state"
+                );
+            }
+
+
+            const response =
+                await provider.generate(
+                    request
+                );
+
+
+            if (
+                repairMode &&
+                prompt.attempt ===
+                    1
+            ) {
+                injectedFaults +=
+                    1;
+
+                console.log(
+                    "\nInjecting deterministic logical fault after initial Qwen response..."
+                );
+
+                return {
+                    ...response,
+
+                    data: {
+                        summary:
+                            `${response.data.summary} [deterministic repair fault injected]`,
+
+                        edits: [
+                            {
+                                operation:
+                                    "write",
+
+                                path:
+                                    "src/math.ts",
+
+                                content:
+                                    [
+                                        "export function add(",
+                                        "    left: number,",
+                                        "    right: number",
+                                        "): number {",
+                                        "    return left + right;",
+                                        "}",
+                                        "",
+                                        "export function clamp(",
+                                        "    value: number,",
+                                        "    min: number,",
+                                        "    max: number",
+                                        "): number {",
+                                        "    /* __GAME_FACTORY_REPAIR_FAULT__ */",
+                                        "    return value;",
+                                        "}",
+                                        ""
+                                    ].join(
+                                        "\n"
+                                    )
+                            }
+                        ]
+                    }
+                };
+            }
+
+
+            return response;
         }
     };
 
@@ -458,7 +658,9 @@ try {
         ],
 
         maxLocalAttempts:
-            1,
+            repairMode
+                ? 2
+                : 1,
 
         escalation: {
             onRepeatedFailure:
@@ -611,6 +813,10 @@ try {
     );
 
     console.log(
+        `Mode: ${repairMode ? "deterministic repair" : "normal"}`
+    );
+
+    console.log(
         `Temporary Git repository: ${repositoryRoot}`
     );
 
@@ -712,17 +918,173 @@ try {
         );
     }
 
+    if (repairMode) {
+        if (
+            iteration.attempts
+                .length !==
+            2
+        ) {
+            throw new Error(
+                `Repair E2E expected exactly 2 attempts, got ${iteration.attempts.length}`
+            );
+        }
+
+
+        const firstAttempt =
+            iteration.attempts[0];
+
+        const secondAttempt =
+            iteration.attempts[1];
+
+
+        if (
+            firstAttempt
+                ?.verification
+                ?.passed !==
+            false
+        ) {
+            throw new Error(
+                "Repair E2E first attempt unexpectedly passed verification"
+            );
+        }
+
+
+        const firstRuntime =
+            firstAttempt
+                .verification
+                .checks
+                .find(
+                    check =>
+                        check.id ===
+                        "runtime"
+                );
+
+        if (
+            !firstRuntime ||
+            firstRuntime.passed !==
+                false
+        ) {
+            throw new Error(
+                "Repair E2E first attempt did not fail runtime verification"
+            );
+        }
+
+
+        if (
+            secondAttempt
+                ?.verification
+                ?.passed !==
+            true
+        ) {
+            throw new Error(
+                "Repair E2E second attempt did not pass verification"
+            );
+        }
+
+
+        if (!repairPromptObserved) {
+            throw new Error(
+                "Second Qwen attempt did not observe repair context"
+            );
+        }
+
+
+        if (
+            injectedFaults !==
+            1
+        ) {
+            throw new Error(
+                `Expected exactly one injected fault, got ${injectedFaults}`
+            );
+        }
+
+
+        if (
+            failureAdvisorCalls !==
+            0
+        ) {
+            throw new Error(
+                `Local repair unexpectedly escalated to FailureAdvisor ${failureAdvisorCalls} time(s)`
+            );
+        }
+
+
+        if (
+            iteration.acceptance
+                ?.attempt !==
+            2
+        ) {
+            throw new Error(
+                `Expected acceptance from attempt 2, got ${iteration.acceptance?.attempt ?? "<missing>"}`
+            );
+        }
+
+
+        console.log(
+            "PASS attempt 1 failed deterministic verification"
+        );
+
+        console.log(
+            "PASS attempt 2 received verifier diagnostics"
+        );
+
+        console.log(
+            "PASS Qwen repaired the existing isolated worktree"
+        );
+
+        console.log(
+            "PASS repair completed without escalation"
+        );
+
+        console.log(
+            "PASS only repaired attempt 2 was accepted"
+        );
+    } else {
+        if (
+            iteration.attempts
+                .length !==
+            1
+        ) {
+            throw new Error(
+                `Normal live E2E expected exactly 1 attempt, got ${iteration.attempts.length}`
+            );
+        }
+    }
+
+    const acceptedAttemptNumber =
+        iteration.acceptance
+            ?.attempt;
+
+    if (!acceptedAttemptNumber) {
+        throw new Error(
+            "Accepted iteration does not identify the accepted attempt"
+        );
+    }
+
+
+    const acceptedAttempt =
+        iteration.attempts.find(
+            attempt =>
+                attempt.attempt ===
+                acceptedAttemptNumber
+        );
+
+    if (!acceptedAttempt) {
+        throw new Error(
+            `Accepted attempt ${acceptedAttemptNumber} was not persisted`
+        );
+    }
+
+
     const engineVerification =
-        iteration
-            .attempts[0]
-            ?.verification;
+        acceptedAttempt.verification;
 
     if (
         !engineVerification ||
         !engineVerification.passed
     ) {
         throw new Error(
-            "Engine did not persist a passing command verification report"
+            `Accepted attempt ${acceptedAttemptNumber} does not contain a passing command verification report`
         );
     }
 
