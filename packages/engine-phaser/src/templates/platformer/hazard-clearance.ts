@@ -1,4 +1,4 @@
-import { ARCADE_GRAVITY_Y, ARCADE_PHYSICS_FPS, PLATFORMER_BODIES, PLATFORMER_ENTITY_HEIGHTS } from "@game-factory/runtime";
+import { ARCADE_GRAVITY_Y, ARCADE_PHYSICS_FPS, PLATFORMER_BODIES, PLATFORMER_ENTITY_HEIGHTS, calculateArcadeJumpHeight } from "@game-factory/runtime";
 import type { PlatformerGameSpec } from "@game-factory/game-spec";
 
 // Preserve the full lethal body and random placement. Only lower its exposed
@@ -7,7 +7,7 @@ export function hazardHeightAboveSurface(movement: PlatformerGameSpec["player"][
     const normal = PLATFORMER_ENTITY_HEIGHTS.hazard;
     const exposure = normal + PLATFORMER_BODIES.hazard.height / 2;
     const { jump_force: force, move_speed: speed } = movement;
-    const idealRise = force ** 2 / (2 * ARCADE_GRAVITY_Y);
+    const idealRise = calculateArcadeJumpHeight(force);
     // Height-impossible configurations remain the existing Reviewer's concern.
     if (idealRise < exposure || speed <= 0) return normal;
     // Semi-implicit Arcade samples lie on this parabola. Allow one horizontal

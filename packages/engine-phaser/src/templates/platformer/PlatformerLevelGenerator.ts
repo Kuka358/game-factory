@@ -1,7 +1,7 @@
 import type {
     PlatformerGameSpec
 } from "@game-factory/game-spec";
-import { PLATFORMER_ENTITY_HEIGHTS, PLATFORMER_FINISH_MARGIN, PLATFORMER_WORLD_EDGE_MARGIN } from "@game-factory/runtime";
+import { PLATFORMER_ENTITY_HEIGHTS, PLATFORMER_FINISH_MARGIN, PLATFORMER_WORLD_EDGE_MARGIN, calculateArcadeJumpHeight } from "@game-factory/runtime";
 import { hazardHeightAboveSurface } from "./hazard-clearance.js";
 
 import {
@@ -728,14 +728,7 @@ function calculateMaximumSafeRise(
      * comfortable instead of frame-perfect.
      */
     const theoretical =
-        (
-            jumpForce *
-            jumpForce
-        ) /
-        (
-            2 *
-            ARCADE_GRAVITY_Y
-        );
+        calculateArcadeJumpHeight(jumpForce);
 
 
     return Math.max(
