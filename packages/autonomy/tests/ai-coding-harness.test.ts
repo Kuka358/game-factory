@@ -104,15 +104,17 @@ describe(
     "AICodingHarness",
     () => {
         it(
-            "provides hinted repository context and applies scoped write edits",
+            "provides hinted repository context and applies scoped surgical edits",
             async () => {
                 const repository =
                     await createRepository();
+
 
                 try {
                     let capturedRequest:
                         AIRequest |
                         undefined;
+
 
                     const provider =
                         createProvider(
@@ -123,24 +125,36 @@ describe(
                                 edits: [
                                     {
                                         operation:
-                                            "write",
+                                            "replace",
 
                                         path:
                                             "src/existing.ts",
 
                                         content:
-                                            "export const existing = 2;\n"
+                                            "",
+
+                                        oldText:
+                                            "existing = 1",
+
+                                        newText:
+                                            "existing = 2"
                                     },
 
                                     {
                                         operation:
-                                            "write",
+                                            "create",
 
                                         path:
                                             "src/new.ts",
 
                                         content:
-                                            "export const created = true;\n"
+                                            "export const created = true;\n",
+
+                                        oldText:
+                                            "",
+
+                                        newText:
+                                            ""
                                     }
                                 ]
                             },
@@ -151,6 +165,7 @@ describe(
                             }
                         );
 
+
                     const harness =
                         new AICodingHarness({
                             provider,
@@ -159,6 +174,7 @@ describe(
                                 "test-model"
                         });
 
+
                     const result =
                         await harness
                             .executeIteration(
@@ -166,6 +182,7 @@ describe(
                                     repository
                                 )
                             );
+
 
                     expect(
                         result
@@ -178,6 +195,7 @@ describe(
                             "src/new.ts"
                         ]
                     });
+
 
                     expect(
                         await readFile(
@@ -192,6 +210,7 @@ describe(
                         "export const existing = 2;\n"
                     );
 
+
                     expect(
                         await readFile(
                             join(
@@ -205,12 +224,14 @@ describe(
                         "export const created = true;\n"
                     );
 
+
                     expect(
                         capturedRequest
                             ?.model
                     ).toBe(
                         "test-model"
                     );
+
 
                     expect(
                         capturedRequest
@@ -220,6 +241,7 @@ describe(
                         "coding_iteration"
                     );
 
+
                     const userMessage =
                         capturedRequest
                             ?.messages
@@ -228,6 +250,7 @@ describe(
                                     message.role ===
                                     "user"
                             );
+
 
                     if (
                         !userMessage ||
@@ -239,6 +262,7 @@ describe(
                             "Expected string user prompt"
                         );
                     }
+
 
                     const prompt =
                         JSON.parse(
@@ -259,11 +283,13 @@ describe(
                                 }>;
                         };
 
+
                     expect(
                         prompt.iteration.id
                     ).toBe(
                         contract.id
                     );
+
 
                     /*
                      * existing.ts is supplied to the model.
@@ -296,11 +322,13 @@ describe(
             }
         );
 
+
         it(
             "never exposes sensitive files hinted directly by the iteration contract",
             async () => {
                 const repository =
                     await createRepository();
+
 
                 try {
                     await writeFile(
@@ -441,11 +469,13 @@ describe(
             }
         );
 
+
         it(
             "can read wider repository context without granting wider write permission",
             async () => {
                 const repository =
                     await createRepository();
+
 
                 try {
                     await writeFile(
@@ -458,9 +488,11 @@ describe(
                         "utf8"
                     );
 
+
                     let capturedRequest:
                         AIRequest |
                         undefined;
+
 
                     const provider =
                         createProvider(
@@ -471,13 +503,19 @@ describe(
                                 edits: [
                                     {
                                         operation:
-                                            "write",
+                                            "replace",
 
                                         path:
                                             "src/helper.ts",
 
                                         content:
-                                            "export const helper = 999;\n"
+                                            "",
+
+                                        oldText:
+                                            "helper = 42",
+
+                                        newText:
+                                            "helper = 999"
                                     }
                                 ]
                             },
@@ -487,6 +525,7 @@ describe(
                                     request;
                             }
                         );
+
 
                     const discovery = {
                         async discover() {
@@ -503,28 +542,30 @@ describe(
                         }
                     };
 
+
                     const narrowContract:
                         IterationContract = {
-                            ...contract,
+                        ...contract,
 
-                            scope: {
-                                allowedPaths: [
-                                    "src/existing.ts"
-                                ],
+                        scope: {
+                            allowedPaths: [
+                                "src/existing.ts"
+                            ],
 
-                                forbiddenPaths:
-                                    []
-                            },
+                            forbiddenPaths:
+                                []
+                        },
 
-                            contextScope: {
-                                allowedPaths: [
-                                    "src/**"
-                                ],
+                        contextScope: {
+                            allowedPaths: [
+                                "src/**"
+                            ],
 
-                                forbiddenPaths:
-                                    []
-                            }
-                        };
+                            forbiddenPaths:
+                                []
+                        }
+                    };
+
 
                     const harness =
                         new AICodingHarness({
@@ -536,6 +577,7 @@ describe(
                             contextDiscovery:
                                 discovery
                         });
+
 
                     await expect(
                         harness.executeIteration(
@@ -549,9 +591,6 @@ describe(
                     );
 
 
-                    /*
-                    * The read-only context file was supplied to the model.
-                    */
                     const userMessage =
                         capturedRequest
                             ?.messages
@@ -560,6 +599,7 @@ describe(
                                     message.role ===
                                     "user"
                             );
+
 
                     if (
                         !userMessage ||
@@ -572,10 +612,12 @@ describe(
                         );
                     }
 
+
                     const prompt =
                         JSON.parse(
                             userMessage.content
                         );
+
 
                     expect(
                         prompt.repositoryFiles
@@ -588,10 +630,6 @@ describe(
                     });
 
 
-                    /*
-                    * But the edit was rejected because write permission
-                    * is still controlled exclusively by contract.scope.
-                    */
                     expect(
                         await readFile(
                             join(
@@ -618,6 +656,7 @@ describe(
                 }
             }
         );
+
 
         it(
             "prioritizes required hinted files over optional context when token budget is limited",
@@ -932,6 +971,7 @@ describe(
             }
         );
 
+
         it(
             "reports the final model context budget decision",
             async () => {
@@ -997,15 +1037,13 @@ describe(
                                     5
                             },
 
+                            /*
+                             * Keep this test independent from prompt
+                             * wording and schema size.
+                             */
                             tokenEstimator: {
-                                estimateTokens(
-                                    text:
-                                        string
-                                ) {
-                                    return Math.ceil(
-                                        text.length /
-                                        20
-                                    );
+                                estimateTokens() {
+                                    return 10;
                                 }
                             },
 
@@ -1090,6 +1128,7 @@ describe(
                 }
             }
         );
+
 
         it(
             "uses real provider token usage to calibrate later context estimates",
@@ -1310,6 +1349,7 @@ describe(
                 const repository =
                     await createRepository();
 
+
                 try {
                     await writeFile(
                         join(
@@ -1320,6 +1360,24 @@ describe(
                         "export const remove = true;\n",
                         "utf8"
                     );
+
+
+                    const deleteContract:
+                        IterationContract = {
+                        ...contract,
+
+                        changes: [
+                            {
+                                description:
+                                    "Delete obsolete source file",
+
+                                filesHint: [
+                                    "src/delete-me.ts"
+                                ]
+                            }
+                        ]
+                    };
+
 
                     const provider =
                         createProvider({
@@ -1335,10 +1393,17 @@ describe(
                                         "src/delete-me.ts",
 
                                     content:
+                                        "",
+
+                                    oldText:
+                                        "",
+
+                                    newText:
                                         ""
                                 }
                             ]
                         });
+
 
                     const harness =
                         new AICodingHarness({
@@ -1348,19 +1413,23 @@ describe(
                                 "test-model"
                         });
 
+
                     const result =
                         await harness
                             .executeIteration(
                                 createInput(
-                                    repository
+                                    repository,
+                                    deleteContract
                                 )
                             );
+
 
                     expect(
                         result.changedFiles
                     ).toEqual([
                         "src/delete-me.ts"
                     ]);
+
 
                     await expect(
                         access(
@@ -1396,6 +1465,7 @@ describe(
                 const repository =
                     await createRepository();
 
+
                 try {
                     const provider =
                         createProvider({
@@ -1405,16 +1475,23 @@ describe(
                             edits: [
                                 {
                                     operation:
-                                        "write",
+                                        "create",
 
                                     path:
                                         "package.json",
 
                                     content:
-                                        "{}\n"
+                                        "{}\n",
+
+                                    oldText:
+                                        "",
+
+                                    newText:
+                                        ""
                                 }
                             ]
                         });
+
 
                     const harness =
                         new AICodingHarness({
@@ -1423,6 +1500,7 @@ describe(
                             model:
                                 "test-model"
                         });
+
 
                     await expect(
                         harness.executeIteration(
@@ -1433,6 +1511,7 @@ describe(
                     ).rejects.toThrow(
                         "outside iteration scope"
                     );
+
 
                     await expect(
                         access(
@@ -1467,6 +1546,7 @@ describe(
                 const repository =
                     await createRepository();
 
+
                 try {
                     const provider =
                         createProvider({
@@ -1476,16 +1556,23 @@ describe(
                             edits: [
                                 {
                                     operation:
-                                        "write",
+                                        "create",
 
                                     path:
                                         "src/secrets/key.ts",
 
                                     content:
-                                        "export const secret = true;\n"
+                                        "export const secret = true;\n",
+
+                                    oldText:
+                                        "",
+
+                                    newText:
+                                        ""
                                 }
                             ]
                         });
+
 
                     const harness =
                         new AICodingHarness({
@@ -1494,6 +1581,7 @@ describe(
                             model:
                                 "test-model"
                         });
+
 
                     await expect(
                         harness.executeIteration(
@@ -1504,6 +1592,7 @@ describe(
                     ).rejects.toThrow(
                         "forbidden"
                     );
+
 
                     await expect(
                         access(
@@ -1533,11 +1622,13 @@ describe(
             }
         );
 
+
         it(
             "uses repository discovery to provide bounded related context",
             async () => {
                 const repository =
                     await createRepository();
+
 
                 try {
                     await writeFile(
@@ -1550,9 +1641,11 @@ describe(
                         "utf8"
                     );
 
+
                     let capturedRequest:
                         AIRequest |
                         undefined;
+
 
                     const provider =
                         createProvider(
@@ -1569,6 +1662,7 @@ describe(
                                     request;
                             }
                         );
+
 
                     const discovery = {
                         async discover() {
@@ -1587,6 +1681,7 @@ describe(
                         }
                     };
 
+
                     const harness =
                         new AICodingHarness({
                             provider,
@@ -1598,11 +1693,13 @@ describe(
                                 discovery
                         });
 
+
                     await harness.executeIteration(
                         createInput(
                             repository
                         )
                     );
+
 
                     const userMessage =
                         capturedRequest
@@ -1612,6 +1709,7 @@ describe(
                                     message.role ===
                                     "user"
                             );
+
 
                     if (
                         !userMessage ||
@@ -1624,10 +1722,12 @@ describe(
                         );
                     }
 
+
                     const prompt =
                         JSON.parse(
                             userMessage.content
                         );
+
 
                     expect(
                         prompt.repositoryInventory
@@ -1636,6 +1736,7 @@ describe(
                         "src/helper.ts",
                         "src/new.ts"
                     ]);
+
 
                     expect(
                         prompt.repositoryFiles
@@ -1671,11 +1772,13 @@ describe(
             }
         );
 
+
         it(
             "validates the entire edit batch before modifying any files",
             async () => {
                 const repository =
                     await createRepository();
+
 
                 try {
                     const provider =
@@ -1686,27 +1789,40 @@ describe(
                             edits: [
                                 {
                                     operation:
-                                        "write",
+                                        "replace",
 
                                     path:
                                         "src/existing.ts",
 
                                     content:
-                                        "export const existing = 999;\n"
+                                        "",
+
+                                    oldText:
+                                        "existing = 1",
+
+                                    newText:
+                                        "existing = 999"
                                 },
 
                                 {
                                     operation:
-                                        "write",
+                                        "create",
 
                                     path:
                                         "package.json",
 
                                     content:
-                                        "{}\n"
+                                        "{}\n",
+
+                                    oldText:
+                                        "",
+
+                                    newText:
+                                        ""
                                 }
                             ]
                         });
+
 
                     const harness =
                         new AICodingHarness({
@@ -1715,6 +1831,7 @@ describe(
                             model:
                                 "test-model"
                         });
+
 
                     await expect(
                         harness.executeIteration(
@@ -1726,10 +1843,11 @@ describe(
                         "outside iteration scope"
                     );
 
+
                     /*
-                    * The first otherwise-valid edit must NOT have been
-                    * applied before the second edit was rejected.
-                    */
+                     * The first otherwise-valid edit must NOT have been
+                     * applied before the second edit was rejected.
+                     */
                     expect(
                         await readFile(
                             join(
@@ -1742,6 +1860,7 @@ describe(
                     ).toBe(
                         "export const existing = 1;\n"
                     );
+
 
                     await expect(
                         access(
@@ -1769,11 +1888,309 @@ describe(
             }
         );
 
+
+        it(
+            "rejects replacing a file that was not supplied in repository context",
+            async () => {
+                const repository =
+                    await createRepository();
+
+
+                try {
+                    await writeFile(
+                        join(
+                            repository,
+                            "src",
+                            "helper.ts"
+                        ),
+                        "export const helper = 42;\n",
+                        "utf8"
+                    );
+
+
+                    const provider =
+                        createProvider({
+                            summary:
+                                "Tried blind replacement",
+
+                            edits: [
+                                {
+                                    operation:
+                                        "replace",
+
+                                    path:
+                                        "src/helper.ts",
+
+                                    content:
+                                        "",
+
+                                    oldText:
+                                        "helper = 42",
+
+                                    newText:
+                                        "helper = 999"
+                                }
+                            ]
+                        });
+
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model"
+                        });
+
+
+                    await expect(
+                        harness.executeIteration(
+                            createInput(
+                                repository
+                            )
+                        )
+                    ).rejects.toThrow(
+                        "replace edit requires visible repository context"
+                    );
+
+
+                    expect(
+                        await readFile(
+                            join(
+                                repository,
+                                "src",
+                                "helper.ts"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        "export const helper = 42;\n"
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+
+        it(
+            "rejects repository context that became stale while the model was running",
+            async () => {
+                const repository =
+                    await createRepository();
+
+
+                try {
+                    const existingPath =
+                        join(
+                            repository,
+                            "src",
+                            "existing.ts"
+                        );
+
+
+                    const provider:
+                        AIProvider = {
+                        id:
+                            "stale-context-fake",
+
+                        async generate<T>(
+                            request:
+                                AIRequest
+                        ) {
+                            /*
+                             * Simulate another actor changing the
+                             * isolated worktree after the prompt was
+                             * constructed but before the model response
+                             * is applied.
+                             */
+                            await writeFile(
+                                existingPath,
+                                "export const existing = 7;\n",
+                                "utf8"
+                            );
+
+
+                            return {
+                                data: {
+                                    summary:
+                                        "Replace stale source",
+
+                                    edits: [
+                                        {
+                                            operation:
+                                                "replace",
+
+                                            path:
+                                                "src/existing.ts",
+
+                                            content:
+                                                "",
+
+                                            oldText:
+                                                "existing = 1",
+
+                                            newText:
+                                                "existing = 2"
+                                        }
+                                    ]
+                                } as T,
+
+                                provider:
+                                    "stale-context-fake",
+
+                                model:
+                                    request.model
+                            };
+                        }
+                    };
+
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model"
+                        });
+
+
+                    await expect(
+                        harness.executeIteration(
+                            createInput(
+                                repository
+                            )
+                        )
+                    ).rejects.toThrow(
+                        "repository context became stale before edit"
+                    );
+
+
+                    /*
+                     * The external mutation is preserved. The stale
+                     * model response must not overwrite it.
+                     */
+                    expect(
+                        await readFile(
+                            existingPath,
+                            "utf8"
+                        )
+                    ).toBe(
+                        "export const existing = 7;\n"
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+
+        it(
+            "rejects using replace as a complete existing-file rewrite",
+            async () => {
+                const repository =
+                    await createRepository();
+
+
+                try {
+                    const provider =
+                        createProvider({
+                            summary:
+                                "Tried complete rewrite",
+
+                            edits: [
+                                {
+                                    operation:
+                                        "replace",
+
+                                    path:
+                                        "src/existing.ts",
+
+                                    content:
+                                        "",
+
+                                    oldText:
+                                        "export const existing = 1;\n",
+
+                                    newText:
+                                        "export const existing = 2;\n"
+                                }
+                            ]
+                        });
+
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model"
+                        });
+
+
+                    await expect(
+                        harness.executeIteration(
+                            createInput(
+                                repository
+                            )
+                        )
+                    ).rejects.toThrow(
+                        "must not replace the complete existing file"
+                    );
+
+
+                    expect(
+                        await readFile(
+                            join(
+                                repository,
+                                "src",
+                                "existing.ts"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        "export const existing = 1;\n"
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+
         it(
             "rejects malformed delete edits returned by the model",
             async () => {
                 const repository =
                     await createRepository();
+
 
                 try {
                     const provider =
@@ -1790,10 +2207,17 @@ describe(
                                         "src/existing.ts",
 
                                     content:
-                                        "this must be empty"
+                                        "this must be empty",
+
+                                    oldText:
+                                        "",
+
+                                    newText:
+                                        ""
                                 }
                             ]
                         });
+
 
                     const harness =
                         new AICodingHarness({
@@ -1803,6 +2227,7 @@ describe(
                                 "test-model"
                         });
 
+
                     await expect(
                         harness.executeIteration(
                             createInput(
@@ -1810,8 +2235,9 @@ describe(
                             )
                         )
                     ).rejects.toThrow(
-                        "delete edit must have empty content"
+                        "delete edit must use empty content oldText and newText"
                     );
+
 
                     /*
                      * Validation occurs before any edit is applied.
@@ -1855,12 +2281,20 @@ function createProvider(
             edits:
                 readonly {
                     operation:
-                        "write" | "delete";
+                        "create" |
+                        "replace" |
+                        "delete";
 
                     path:
                         string;
 
                     content:
+                        string;
+
+                    oldText:
+                        string;
+
+                    newText:
                         string;
                 }[];
         },
@@ -1882,6 +2316,7 @@ function createProvider(
             capture?.(
                 request
             );
+
 
             return {
                 data:
@@ -1935,6 +2370,7 @@ async function createRepository():
             )
         );
 
+
     await mkdir(
         join(
             repository,
@@ -1946,6 +2382,7 @@ async function createRepository():
         }
     );
 
+
     await writeFile(
         join(
             repository,
@@ -1955,6 +2392,7 @@ async function createRepository():
         "export const existing = 1;\n",
         "utf8"
     );
+
 
     return repository;
 }

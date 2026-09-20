@@ -1,13 +1,9 @@
 import {
     lstat,
-    mkdir,
-    readFile,
-    rm,
-    writeFile
+    readFile
 } from "node:fs/promises";
 
 import {
-    dirname,
     resolve
 } from "node:path";
 
@@ -44,6 +40,14 @@ import {
     type TokenEstimateCalibrationObservation,
     type TokenEstimator
 } from "./model-context-budget.js";
+
+import {
+    SurgicalEditApplicator
+} from "./surgical-edit-filesystem.js";
+
+import type {
+    SurgicalFileEdit
+} from "./surgical-edit.js";
 
 export interface AICodingHarnessOptions {
     provider:
@@ -89,39 +93,64 @@ export interface AICodingHarnessOptions {
         ) => void;
 }
 
-
-interface AIFileEdit {
+interface AIFileEditPayload {
     operation:
-        "write" | "delete";
+        "create" |
+        "replace" |
+        "delete";
 
     path:
         string;
 
+    /*
+     * All fields are deliberately required by the JSON schema.
+     *
+     * This keeps strict structured-output compatibility simple:
+     *
+     * create:
+     *   content = complete new file
+     *   oldText = ""
+     *   newText = ""
+     *
+     * replace:
+     *   content = ""
+     *   oldText = exact current text
+     *   newText = replacement
+     *
+     * delete:
+     *   content = ""
+     *   oldText = ""
+     *   newText = ""
+     */
     content:
+        string;
+
+    oldText:
+        string;
+
+    newText:
         string;
 }
 
-interface PreparedAIFileEdit {
-    operation:
-        "write" | "delete";
 
-    path:
-        string;
-
-    absolutePath:
-        string;
-
-    content:
-        string;
-}
-
-interface AICodingResponse {
+interface AICodingResponsePayload {
     summary:
         string;
 
     edits:
-        readonly AIFileEdit[];
+        readonly AIFileEditPayload[];
 }
+
+
+interface ValidatedAICodingResponse {
+    summary:
+        string;
+
+    edits:
+        readonly SurgicalFileEdit[];
+}
+
+
 
 
 interface RepositoryContextFile {
@@ -138,6 +167,9 @@ export class AICodingHarness
 {
     private readonly guard =
         new WorkspaceGuard();
+
+    private readonly editApplicator =
+        new SurgicalEditApplicator();
 
     private readonly maxContextFileBytes:
         number;
@@ -259,7 +291,7 @@ export class AICodingHarness
         const response =
             await this.options
                 .provider
-                .generate<AICodingResponse>({
+                .generate<AICodingResponsePayload>({
                     model:
                         this.options.model,
 
@@ -333,11 +365,31 @@ export class AICodingHarness
                 response.data
             );
 
+        /*
+         * Existing-file operations may only target exact file
+         * contents that were actually shown to the coding model.
+         *
+         * This also detects mutations that happened while the
+         * model request was in flight.
+         */
+        await this.assertVisibleEditTargetsCurrent(
+            input,
+            result.edits,
+            promptContext.files
+        );
+
+
         const changedFiles =
-            await this.applyEdits(
-                input,
-                result.edits
-            );
+            await this.editApplicator.apply({
+                repositoryRoot:
+                    input.repositoryRoot,
+
+                scope:
+                    input.contract.scope,
+
+                edits:
+                    result.edits
+            });
 
         return {
             summary:
@@ -843,162 +895,201 @@ export class AICodingHarness
             );
     }
 
-
-    private async applyEdits(
+    private async assertVisibleEditTargetsCurrent(
         input:
             CodingHarnessInput,
 
         edits:
-            readonly AIFileEdit[]
-    ): Promise<string[]> {
+            readonly SurgicalFileEdit[],
+
+        visibleFiles:
+            readonly RepositoryContextFile[]
+    ): Promise<void> {
+        const normalizedEdits =
+            edits.map(
+                edit => ({
+                    edit,
+
+                    path:
+                        normalizeRepositoryPath(
+                            edit.path
+                        )
+                })
+            );
+
+
         /*
-        * Validate EVERY edit before touching the filesystem.
-        *
-        * This prevents a response such as:
-        *
-        * 1. valid write
-        * 2. forbidden write
-        *
-        * from partially modifying the worktree before the second
-        * edit is rejected.
-        */
-        const prepared =
-            await this.prepareEdits(
-                input,
-                edits
-            );
-
-        const changedFiles:
-            string[] = [];
-
-        const seen =
-            new Set<string>();
-
+         * Validate the complete write scope before performing
+         * filesystem reads for individual edit targets.
+         *
+         * SurgicalEditApplicator performs the same check again
+         * before mutation; this is intentional defence in depth.
+         */
         for (
-            const edit of
-            prepared
+            const item of
+            normalizedEdits
         ) {
-            /*
-            * Recheck immediately before mutation in case the
-            * filesystem changed between validation and application.
-            */
-            await assertNoSymbolicLinkTraversal(
-                input.repositoryRoot,
-                edit.path
-            );
-
-            if (
-                edit.operation ===
-                "write"
-            ) {
-                await mkdir(
-                    dirname(
-                        edit.absolutePath
-                    ),
-                    {
-                        recursive:
-                            true
-                    }
-                );
-
-                /*
-                * mkdir may have created missing parents, so validate
-                * the final path chain one more time.
-                */
-                await assertNoSymbolicLinkTraversal(
-                    input.repositoryRoot,
-                    edit.path
-                );
-
-                await writeFile(
-                    edit.absolutePath,
-                    edit.content,
-                    "utf8"
-                );
-            } else {
-                await rm(
-                    edit.absolutePath,
-                    {
-                        force:
-                            true
-                    }
-                );
-            }
-
-            if (
-                !seen.has(
-                    edit.path
-                )
-            ) {
-                seen.add(
-                    edit.path
-                );
-
-                changedFiles.push(
-                    edit.path
-                );
-            }
-        }
-
-        return changedFiles;
-    }
-
-
-    private async prepareEdits(
-        input:
-            CodingHarnessInput,
-
-        edits:
-            readonly AIFileEdit[]
-    ): Promise<PreparedAIFileEdit[]> {
-        const prepared:
-            PreparedAIFileEdit[] = [];
-
-        for (
-            const edit of
-            edits
-        ) {
-            const path =
-                normalizeRepositoryPath(
-                    edit.path
-                );
-
             this.guard
                 .assertPathAllowed(
-                    path,
+                    item.path,
                     input.contract.scope
                 );
+        }
 
-            const absolutePath =
+
+        const visible =
+            new Map<
+                string,
+                string
+            >();
+
+
+        for (
+            const file of
+            visibleFiles
+        ) {
+            visible.set(
+                normalizeRepositoryPath(
+                    file.path
+                ),
+
+                file.content
+            );
+        }
+
+
+        const checked =
+            new Set<string>();
+
+
+        for (
+            const item of
+            normalizedEdits
+        ) {
+            /*
+             * New files obviously cannot have been present in
+             * repositoryFiles.
+             *
+             * The applicator will independently prove that a
+             * create target really does not exist.
+             */
+            if (
+                item.edit.operation ===
+                "create"
+            ) {
+                continue;
+            }
+
+
+            if (
+                !visible.has(
+                    item.path
+                )
+            ) {
+                throw new Error(
+                    [
+                        "AI coding harness",
+                        item.edit.operation,
+                        "edit requires visible repository context:",
+                        item.path
+                    ].join(
+                        " "
+                    )
+                );
+            }
+
+
+            /*
+             * Several replacements can target the same file.
+             * The filesystem only needs to be compared against
+             * the original prompt snapshot once here.
+             */
+            if (
+                checked.has(
+                    item.path
+                )
+            ) {
+                continue;
+            }
+
+
+            checked.add(
+                item.path
+            );
+
+
+            const expected =
+                visible.get(
+                    item.path
+                );
+
+
+            if (
+                expected ===
+                undefined
+            ) {
+                throw new Error(
+                    `Missing visible repository context: ${item.path}`
+                );
+            }
+
+
+            const absolute =
                 resolve(
                     input.repositoryRoot,
-                    path
+                    item.path
                 );
+
 
             assertInsideRepository(
                 input.repositoryRoot,
-                absolutePath
+                absolute
             );
+
 
             await assertNoSymbolicLinkTraversal(
                 input.repositoryRoot,
-                path
+                item.path
             );
 
-            prepared.push({
-                operation:
-                    edit.operation,
 
-                path,
+            let current:
+                string;
 
-                absolutePath,
 
-                content:
-                    edit.content
-            });
+            try {
+                current =
+                    await readFile(
+                        absolute,
+                        "utf8"
+                    );
+            } catch (
+                error
+            ) {
+                if (
+                    isMissingFileError(
+                        error
+                    )
+                ) {
+                    throw new Error(
+                        `AI coding harness repository context became stale before edit: ${item.path}`
+                    );
+                }
+
+
+                throw error;
+            }
+
+
+            if (
+                current !==
+                expected
+            ) {
+                throw new Error(
+                    `AI coding harness repository context became stale before edit: ${item.path}`
+                );
+            }
         }
-
-        return prepared;
     }
 
     private async discoverContext(
@@ -1143,11 +1234,27 @@ function createSystemPrompt():
         "Do not return shell commands.",
         "Return only data matching the requested JSON schema.",
         "",
-        "For each file change use:",
-        '- operation=\"write\" with the complete final file content, or',
-        '- operation=\"delete\" with content=\"\".',
+        "Every edit must include operation, path, content, oldText, and newText.",
         "",
-        "Prefer minimal changes.",
+        "Use operation=\"create\" only for a file that does not currently exist.",
+        "For create: content is the complete new file; oldText=\"\" and newText=\"\".",
+        "",
+        "Use operation=\"replace\" to modify an existing file.",
+        "For replace: content=\"\".",
+        "oldText must be exact text from the current file state and must match exactly once.",
+        "newText is the replacement text and may be empty.",
+        "Use the smallest practical unique oldText range.",
+        "Do not use the complete existing file as oldText.",
+        "Do not simulate a whole-file rewrite.",
+        "When several replacements target one file, each replacement is applied in response order.",
+        "A later oldText must match the virtual file state produced by earlier replacements.",
+        "",
+        "Use operation=\"delete\" only for an existing file supplied in repositoryFiles.",
+        "For delete: content=\"\", oldText=\"\", and newText=\"\".",
+        "",
+        "Existing files must never use operation=\"create\".",
+        "Files not supplied in repositoryFiles must not be replaced or deleted.",
+        "Prefer minimal surgical changes.",
         "Do not invent unrelated refactors.",
         "",
         "When attempt is greater than 1, previousVerification is authoritative repair feedback.",
@@ -1263,7 +1370,8 @@ function createResponseSchema():
                                 "string",
 
                             enum: [
-                                "write",
+                                "create",
+                                "replace",
                                 "delete"
                             ]
                         },
@@ -1279,13 +1387,33 @@ function createResponseSchema():
                         content: {
                             type:
                                 "string"
+                        },
+
+                        oldText: {
+                            type:
+                                "string"
+                        },
+
+                        newText: {
+                            type:
+                                "string"
                         }
                     },
 
+                    /*
+                     * Keep every property required.
+                     *
+                     * OpenAI-compatible strict JSON-schema
+                     * implementations are much more predictable with
+                     * fixed object shapes than optional discriminated
+                     * unions.
+                     */
                     required: [
                         "operation",
                         "path",
-                        "content"
+                        "content",
+                        "oldText",
+                        "newText"
                     ],
 
                     additionalProperties:
@@ -1307,17 +1435,18 @@ function createResponseSchema():
 
 function validateResponse(
     value:
-        AICodingResponse
-): AICodingResponse {
+        unknown
+): ValidatedAICodingResponse {
     if (
-        typeof value !==
-            "object" ||
-        value === null
+        !isRecord(
+            value
+        )
     ) {
         throw new Error(
             "AI coding harness returned an invalid response"
         );
     }
+
 
     if (
         typeof value.summary !==
@@ -1332,6 +1461,7 @@ function validateResponse(
         );
     }
 
+
     if (
         !Array.isArray(
             value.edits
@@ -1342,23 +1472,38 @@ function validateResponse(
         );
     }
 
+
+    const edits:
+        SurgicalFileEdit[] = [];
+
+
     for (
-        const edit of
+        const rawEdit of
         value.edits
     ) {
         if (
-            typeof edit !==
-                "object" ||
-            edit === null ||
+            !isRecord(
+                rawEdit
+            ) ||
             (
-                edit.operation !==
-                    "write" &&
-                edit.operation !==
+                rawEdit.operation !==
+                    "create" &&
+                rawEdit.operation !==
+                    "replace" &&
+                rawEdit.operation !==
                     "delete"
             ) ||
-            typeof edit.path !==
+            typeof rawEdit.path !==
                 "string" ||
-            typeof edit.content !==
+            rawEdit.path
+                .trim()
+                .length ===
+                0 ||
+            typeof rawEdit.content !==
+                "string" ||
+            typeof rawEdit.oldText !==
+                "string" ||
+            typeof rawEdit.newText !==
                 "string"
         ) {
             throw new Error(
@@ -1366,24 +1511,111 @@ function validateResponse(
             );
         }
 
-        if (
-            edit.operation ===
-                "delete" &&
-            edit.content !==
-                ""
+
+        switch (
+            rawEdit.operation
         ) {
-            throw new Error(
-                "AI coding harness delete edit must have empty content"
-            );
+            case "create": {
+                if (
+                    rawEdit.oldText !==
+                        "" ||
+                    rawEdit.newText !==
+                        ""
+                ) {
+                    throw new Error(
+                        "AI coding harness create edit must use empty oldText and newText"
+                    );
+                }
+
+
+                edits.push({
+                    operation:
+                        "create",
+
+                    path:
+                        rawEdit.path,
+
+                    content:
+                        rawEdit.content
+                });
+
+                break;
+            }
+
+
+            case "replace": {
+                if (
+                    rawEdit.content !==
+                    ""
+                ) {
+                    throw new Error(
+                        "AI coding harness replace edit must have empty content"
+                    );
+                }
+
+
+                if (
+                    rawEdit.oldText.length ===
+                    0
+                ) {
+                    throw new Error(
+                        "AI coding harness replace edit must have non-empty oldText"
+                    );
+                }
+
+
+                edits.push({
+                    operation:
+                        "replace",
+
+                    path:
+                        rawEdit.path,
+
+                    oldText:
+                        rawEdit.oldText,
+
+                    newText:
+                        rawEdit.newText
+                });
+
+                break;
+            }
+
+
+            case "delete": {
+                if (
+                    rawEdit.content !==
+                        "" ||
+                    rawEdit.oldText !==
+                        "" ||
+                    rawEdit.newText !==
+                        ""
+                ) {
+                    throw new Error(
+                        "AI coding harness delete edit must use empty content oldText and newText"
+                    );
+                }
+
+
+                edits.push({
+                    operation:
+                        "delete",
+
+                    path:
+                        rawEdit.path
+                });
+
+                break;
+            }
         }
     }
+
 
     return {
         summary:
             value.summary.trim(),
 
-        edits:
-            value.edits
+        edits
     };
 }
 
@@ -1502,6 +1734,21 @@ function isMissingFileError(
                 NodeJS.ErrnoException
         ).code ===
             "ENOENT"
+    );
+}
+
+function isRecord(
+    value:
+        unknown
+): value is Record<string, unknown> {
+    return (
+        typeof value ===
+            "object" &&
+        value !==
+            null &&
+        !Array.isArray(
+            value
+        )
     );
 }
 
