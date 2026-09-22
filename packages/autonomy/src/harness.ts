@@ -46,3 +46,38 @@ export interface CodingHarness {
             CodingHarnessInput
     ): Promise<CodingHarnessResult>;
 }
+
+export class RetryableCodingHarnessError
+    extends Error
+{
+    readonly retryable =
+        true;
+
+
+    constructor(
+        message:
+            string,
+
+        options?:
+            ErrorOptions
+    ) {
+        super(
+            message,
+            options
+        );
+
+        this.name =
+            "RetryableCodingHarnessError";
+    }
+}
+
+
+export function isRetryableCodingHarnessError(
+    error:
+        unknown
+): error is RetryableCodingHarnessError {
+    return (
+        error instanceof
+        RetryableCodingHarnessError
+    );
+}

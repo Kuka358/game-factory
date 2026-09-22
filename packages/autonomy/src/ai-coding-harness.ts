@@ -49,6 +49,10 @@ import type {
     SurgicalFileEdit
 } from "./surgical-edit.js";
 
+import {
+    RetryableCodingHarnessError
+} from "./harness.js";
+
 export interface AICodingHarnessOptions {
     provider:
         AIProvider;
@@ -97,31 +101,13 @@ interface AIFileEditPayload {
     operation:
         "create" |
         "replace" |
+        "insert_before" |
+        "insert_after" |
         "delete";
 
     path:
         string;
 
-    /*
-     * All fields are deliberately required by the JSON schema.
-     *
-     * This keeps strict structured-output compatibility simple:
-     *
-     * create:
-     *   content = complete new file
-     *   oldText = ""
-     *   newText = ""
-     *
-     * replace:
-     *   content = ""
-     *   oldText = exact current text
-     *   newText = replacement
-     *
-     * delete:
-     *   content = ""
-     *   oldText = ""
-     *   newText = ""
-     */
     content:
         string;
 
@@ -129,6 +115,9 @@ interface AIFileEditPayload {
         string;
 
     newText:
+        string;
+
+    anchor:
         string;
 }
 
@@ -270,6 +259,7 @@ export class AICodingHarness
                 responseSchema
             );
 
+
         if (
             promptContext.report
         ) {
@@ -288,6 +278,13 @@ export class AICodingHarness
             );
 
 
+        /*
+        * Provider/network failures are intentionally NOT converted into
+        * retryable surgical-edit failures.
+        *
+        * A RetryableCodingHarnessError means specifically that the model
+        * returned a coding response which cannot safely be applied.
+        */
         const response =
             await this.options
                 .provider
@@ -329,6 +326,7 @@ export class AICodingHarness
                     }
                 });
 
+
         const actualInputTokens =
             response.usage
                 ?.inputTokens;
@@ -360,43 +358,92 @@ export class AICodingHarness
                 );
         }
 
-        const result =
-            validateResponse(
-                response.data
-            );
+
+        let result:
+            ValidatedAICodingResponse;
+
 
         /*
-         * Existing-file operations may only target exact file
-         * contents that were actually shown to the coding model.
-         *
-         * This also detects mutations that happened while the
-         * model request was in flight.
-         */
-        await this.assertVisibleEditTargetsCurrent(
+        * Invalid structured model output is a model-correctable failure.
+        * No filesystem mutation has happened at this point.
+        */
+        try {
+            result =
+                validateResponse(
+                    response.data
+                );
+        } catch (
+            error
+        ) {
+            throw createRetryableCodingResponseError(
+                error
+            );
+        }
+
+
+        /*
+        * Scope/forbidden-path validation is a security boundary.
+        *
+        * Do this OUTSIDE the retryable catch. A model trying to modify
+        * an unauthorized path must not turn into an ordinary repair
+        * attempt.
+        */
+        this.assertEditScope(
             input,
-            result.edits,
-            promptContext.files
+            result.edits
         );
 
 
-        const changedFiles =
-            await this.editApplicator.apply({
-                repositoryRoot:
-                    input.repositoryRoot,
+        /*
+        * From here we only convert explicitly classified model-correctable
+        * failures into RetryableCodingHarnessError.
+        *
+        * SurgicalEditApplicator is transactional: planning failures mutate
+        * nothing and application failures roll back before escaping.
+        */
+        try {
+            await this.assertVisibleEditTargetsCurrent(
+                input,
+                result.edits,
+                promptContext.files
+            );
 
-                scope:
-                    input.contract.scope,
 
-                edits:
-                    result.edits
-            });
+            const changedFiles =
+                await this.editApplicator.apply({
+                    repositoryRoot:
+                        input.repositoryRoot,
 
-        return {
-            summary:
-                result.summary,
+                    scope:
+                        input.contract.scope,
 
-            changedFiles
-        };
+                    edits:
+                        result.edits
+                });
+
+
+            return {
+                summary:
+                    result.summary,
+
+                changedFiles
+            };
+        } catch (
+            error
+        ) {
+            if (
+                isRetryableCodingResponseFailure(
+                    error
+                )
+            ) {
+                throw createRetryableCodingResponseError(
+                    error
+                );
+            }
+
+
+            throw error;
+        }
     }
 
 
@@ -895,6 +942,31 @@ export class AICodingHarness
             );
     }
 
+    private assertEditScope(
+        input:
+            CodingHarnessInput,
+
+        edits:
+            readonly SurgicalFileEdit[]
+    ): void {
+        for (
+            const edit of
+            edits
+        ) {
+            const path =
+                normalizeRepositoryPath(
+                    edit.path
+                );
+
+
+            this.guard
+                .assertPathAllowed(
+                    path,
+                    input.contract.scope
+                );
+        }
+    }
+
     private async assertVisibleEditTargetsCurrent(
         input:
             CodingHarnessInput,
@@ -1234,31 +1306,39 @@ function createSystemPrompt():
         "Do not return shell commands.",
         "Return only data matching the requested JSON schema.",
         "",
-        "Every edit must include operation, path, content, oldText, and newText.",
+        "Every edit must include operation, path, content, oldText, newText, and anchor.",
         "",
         "Use operation=\"create\" only for a file that does not currently exist.",
-        "For create: content is the complete new file; oldText=\"\" and newText=\"\".",
+        "For create: content is the complete new file; oldText=\"\", newText=\"\", anchor=\"\".",
         "",
-        "Use operation=\"replace\" to modify an existing file.",
-        "For replace: content=\"\".",
-        "oldText must be exact text from the current file state and must match exactly once.",
+        "Use operation=\"replace\" only when changing existing text.",
+        "For replace: content=\"\", anchor=\"\".",
+        "If structured output duplicates the replacement into content, keep content identical to newText.",
+        "Never put different replacement values into content and newText.",
+        "oldText must be exact current text and must match exactly once.",
         "newText is the replacement text and may be empty.",
+        "Do not return a replace when oldText and the replacement text are identical.",
+        "If the requested final state is already present, omit that edit.",
+        "oldText must cover no more than 80% of the current file.",
         "Use the smallest practical unique oldText range.",
-        "Do not use the complete existing file as oldText.",
-        "Do not simulate a whole-file rewrite.",
-        "When several replacements target one file, each replacement is applied in response order.",
-        "A later oldText must match the virtual file state produced by earlier replacements.",
+        "",
+        "Use operation=\"insert_before\" or operation=\"insert_after\" when adding new code without replacing existing code.",
+        "For insertion: content is the new text, anchor is exact existing text that matches exactly once, oldText=\"\", newText=\"\".",
+        "Prefer insert_before or insert_after instead of replacing a large existing range merely to add code.",
         "",
         "Use operation=\"delete\" only for an existing file supplied in repositoryFiles.",
-        "For delete: content=\"\", oldText=\"\", and newText=\"\".",
+        "For delete: content=\"\", oldText=\"\", newText=\"\", anchor=\"\".",
         "",
         "Existing files must never use operation=\"create\".",
-        "Files not supplied in repositoryFiles must not be replaced or deleted.",
+        "Files not supplied in repositoryFiles must not be replaced, inserted into, or deleted.",
         "Prefer minimal surgical changes.",
         "Do not invent unrelated refactors.",
         "",
         "When attempt is greater than 1, previousVerification is authoritative repair feedback.",
         "Repository files contain the current state of the same isolated worktree, including edits from prior failed attempts.",
+        "When repairInstructions describe a rejected surgical edit batch, treat them as authoritative patch-application feedback.",
+        "Re-read repositoryFiles from the current attempt before choosing oldText or anchor.",
+        "Never reuse a rejected oldText or anchor unless it appears exactly in the current repositoryFiles.",
         "Fix the reported verification failures without discarding unrelated correct work."
     ].join(
         "\n"
@@ -1372,6 +1452,8 @@ function createResponseSchema():
                             enum: [
                                 "create",
                                 "replace",
+                                "insert_before",
+                                "insert_after",
                                 "delete"
                             ]
                         },
@@ -1397,23 +1479,21 @@ function createResponseSchema():
                         newText: {
                             type:
                                 "string"
+                        },
+
+                        anchor: {
+                            type:
+                                "string"
                         }
                     },
 
-                    /*
-                     * Keep every property required.
-                     *
-                     * OpenAI-compatible strict JSON-schema
-                     * implementations are much more predictable with
-                     * fixed object shapes than optional discriminated
-                     * unions.
-                     */
                     required: [
                         "operation",
                         "path",
                         "content",
                         "oldText",
-                        "newText"
+                        "newText",
+                        "anchor"
                     ],
 
                     additionalProperties:
@@ -1491,6 +1571,10 @@ function validateResponse(
                 rawEdit.operation !==
                     "replace" &&
                 rawEdit.operation !==
+                    "insert_before" &&
+                rawEdit.operation !==
+                    "insert_after" &&
+                rawEdit.operation !==
                     "delete"
             ) ||
             typeof rawEdit.path !==
@@ -1504,6 +1588,8 @@ function validateResponse(
             typeof rawEdit.oldText !==
                 "string" ||
             typeof rawEdit.newText !==
+                "string" ||
+            typeof rawEdit.anchor !==
                 "string"
         ) {
             throw new Error(
@@ -1520,10 +1606,12 @@ function validateResponse(
                     rawEdit.oldText !==
                         "" ||
                     rawEdit.newText !==
+                        "" ||
+                    rawEdit.anchor !==
                         ""
                 ) {
                     throw new Error(
-                        "AI coding harness create edit must use empty oldText and newText"
+                        "AI coding harness create edit must use empty oldText newText and anchor"
                     );
                 }
 
@@ -1544,14 +1632,6 @@ function validateResponse(
 
 
             case "replace": {
-                if (
-                    rawEdit.content !==
-                    ""
-                ) {
-                    throw new Error(
-                        "AI coding harness replace edit must have empty content"
-                    );
-                }
 
 
                 if (
@@ -1561,6 +1641,60 @@ function validateResponse(
                     throw new Error(
                         "AI coding harness replace edit must have non-empty oldText"
                     );
+                }
+
+
+                /*
+                * Fixed-shape structured output occasionally puts the
+                * replacement payload into content instead of newText.
+                *
+                * Safe normalizations:
+                *
+                *   content=""      newText="x"  -> "x"
+                *   content="x"     newText=""   -> "x"
+                *   content="x"     newText="x"  -> "x"
+                *
+                * Conflicting non-empty values are rejected.
+                *
+                * Both empty values remain valid because replace may
+                * intentionally delete the matched range.
+                */
+                if (
+                    rawEdit.content !==
+                        "" &&
+                    rawEdit.newText !==
+                        "" &&
+                    rawEdit.content !==
+                        rawEdit.newText
+                ) {
+                    throw new Error(
+                        "AI coding harness replace edit content and newText conflict"
+                    );
+                }
+
+
+                const replacementText =
+                    rawEdit.newText !==
+                        ""
+                        ? rawEdit.newText
+                        : rawEdit.content;
+
+
+                /*
+                * Structured-output models sometimes emit an edit describing
+                * text that is already in the requested final state.
+                *
+                * A no-op replace has no filesystem effect and carries no extra
+                * authority, so the AI-facing protocol safely normalizes it away.
+                *
+                * Keep SurgicalEditPlanner itself strict: direct callers still
+                * receive an error for no-op replacements.
+                */
+                if (
+                    replacementText ===
+                    rawEdit.oldText
+                ) {
+                    break;
                 }
 
 
@@ -1575,7 +1709,78 @@ function validateResponse(
                         rawEdit.oldText,
 
                     newText:
-                        rawEdit.newText
+                        replacementText
+                });
+
+
+                break;
+            }
+
+
+            case "insert_before":
+            case "insert_after": {
+                if (
+                    rawEdit.oldText !==
+                    ""
+                ) {
+                    throw new Error(
+                        "AI coding harness insert edit must have empty oldText"
+                    );
+                }
+
+
+                if (
+                    rawEdit.anchor.length ===
+                    0
+                ) {
+                    throw new Error(
+                        "AI coding harness insert edit must have non-empty anchor"
+                    );
+                }
+
+
+                if (
+                    rawEdit.content.length ===
+                    0
+                ) {
+                    throw new Error(
+                        "AI coding harness insert edit must have non-empty content"
+                    );
+                }
+
+
+                /*
+                * Structured-output models sometimes duplicate the insertion
+                * payload into newText even though the fixed-shape protocol asks
+                * for newText="".
+                *
+                * This is safe to normalize only when it is exactly identical to
+                * content. Any conflicting newText remains an invalid response.
+                */
+                if (
+                    rawEdit.newText !==
+                        "" &&
+                    rawEdit.newText !==
+                        rawEdit.content
+                ) {
+                    throw new Error(
+                        "AI coding harness insert edit newText must be empty or exactly match content"
+                    );
+                }
+
+
+                edits.push({
+                    operation:
+                        rawEdit.operation,
+
+                    path:
+                        rawEdit.path,
+
+                    anchor:
+                        rawEdit.anchor,
+
+                    content:
+                        rawEdit.content
                 });
 
                 break;
@@ -1589,10 +1794,12 @@ function validateResponse(
                     rawEdit.oldText !==
                         "" ||
                     rawEdit.newText !==
+                        "" ||
+                    rawEdit.anchor !==
                         ""
                 ) {
                     throw new Error(
-                        "AI coding harness delete edit must use empty content oldText and newText"
+                        "AI coding harness delete edit must use empty content oldText newText and anchor"
                     );
                 }
 
@@ -1773,4 +1980,107 @@ function positiveInteger(
 
 
     return value;
+}
+
+function createRetryableCodingResponseError(
+    error:
+        unknown
+): RetryableCodingHarnessError {
+    return new RetryableCodingHarnessError(
+        [
+            "AI coding response could not be applied safely.",
+            describeError(
+                error
+            )
+        ].join(
+            " "
+        ),
+
+        {
+            cause:
+                error
+        }
+    );
+}
+
+
+function isRetryableCodingResponseFailure(
+    error:
+        unknown
+): boolean {
+    if (
+        !(error instanceof Error)
+    ) {
+        return false;
+    }
+
+
+    const message =
+        error.message;
+
+
+    /*
+     * The model referenced repository state it was not given,
+     * or repository state changed after the prompt was prepared.
+     *
+     * A fresh attempt receives freshly-read repositoryFiles, so
+     * these failures are safe and useful to retry.
+     */
+    if (
+        message.includes(
+            "edit requires visible repository context"
+        ) ||
+        message.includes(
+            "repository context became stale before edit"
+        )
+    ) {
+        return true;
+    }
+
+
+    /*
+     * These are deterministic surgical-planner rejections caused by
+     * the model returning an invalid/stale patch.
+     *
+     * Do NOT include workspace scope, symlink, binary-file or rollback
+     * errors here. Those are security/integrity failures and must escape
+     * normally.
+     */
+    const retryableSurgicalMessages = [
+        "Surgical create requires a missing file:",
+        "Surgical replace requires an existing file:",
+        "Surgical replace oldText must not be empty:",
+        "Surgical replace must change content:",
+        "Surgical replace must not replace the complete existing file:",
+        "Surgical replace anchor was not found:",
+        "Surgical replace anchor is ambiguous",
+        "Surgical replace anchor covers too much",
+        "Surgical insert requires an existing file:",
+        "Surgical insert anchor must not be empty:",
+        "Surgical insert content must not be empty:",
+        "Surgical insert anchor was not found:",
+        "Surgical insert anchor is ambiguous",
+        "Surgical delete requires an existing file:"
+    ];
+
+
+    return retryableSurgicalMessages.some(
+        retryable =>
+            message.includes(
+                retryable
+            )
+    );
+}
+
+
+function describeError(
+    error:
+        unknown
+): string {
+    return error instanceof
+        Error
+        ? error.message
+        : String(
+            error
+        );
 }

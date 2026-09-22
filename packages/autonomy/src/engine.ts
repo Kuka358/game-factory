@@ -35,6 +35,10 @@ import {
     RecoveryManager
 } from "./recovery.js";
 
+import {
+    isRetryableCodingHarnessError
+} from "./harness.js";
+
 export interface AutonomyEngineDependencies {
     planner:
         Planner;
@@ -978,6 +982,88 @@ export class AutonomyEngine {
 
                 return "stopped";
             } catch (error) {
+                if (
+                    isRetryableCodingHarnessError(
+                        error
+                    ) &&
+                    attempt <
+                        contract.maxLocalAttempts
+                ) {
+                    const message =
+                        getErrorMessage(
+                            error
+                        );
+
+
+                    attemptRecord.error =
+                        message;
+
+                    attemptRecord.completedAt =
+                        this.now();
+
+
+                    /*
+                     * Surgical application is transactional:
+                     *
+                     * validation failures mutate nothing and runtime
+                     * application failures are rolled back before the
+                     * error escapes. Therefore the same isolated
+                     * workspace is safe to reuse for the next model
+                     * attempt.
+                     */
+                    previousVerification =
+                        undefined;
+
+                    repairInstructions = [
+                        [
+                            "The previous coding response could not be applied safely.",
+                            message
+                        ].join(
+                            " "
+                        ),
+
+                        [
+                            "Re-read the current repositoryFiles and return a corrected surgical edit batch.",
+                            "Every replace oldText and every insert anchor must exactly match the current file state.",
+                            "Use small unique anchors and do not repeat the rejected patch."
+                        ].join(
+                            " "
+                        )
+                    ];
+
+
+                    attempt +=
+                        1;
+
+
+                    await this.record(
+                        run,
+                        {
+                            runId:
+                                run.id,
+
+                            type:
+                                "repair_requested",
+
+                            timestamp:
+                                this.now(),
+
+                            iterationId:
+                                contract.id,
+
+                            attempt,
+
+                            details: {
+                                instructions:
+                                    repairInstructions
+                            }
+                        }
+                    );
+
+
+                    continue;
+                }
+
                 if (
                     record.acceptance
                 ) {

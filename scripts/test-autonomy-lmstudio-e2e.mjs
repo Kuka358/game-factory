@@ -177,6 +177,7 @@ try {
                         "user"
                 );
 
+
             if (
                 !userMessage ||
                 typeof userMessage.content !==
@@ -187,10 +188,12 @@ try {
                 );
             }
 
+
             const prompt =
                 JSON.parse(
                     userMessage.content
                 );
+
 
             const inventory =
                 Array.isArray(
@@ -199,12 +202,14 @@ try {
                     ? prompt.repositoryInventory
                     : [];
 
+
             const repositoryFiles =
                 Array.isArray(
                     prompt.repositoryFiles
                 )
                     ? prompt.repositoryFiles
                     : [];
+
 
             const contextPaths =
                 repositoryFiles.map(
@@ -223,6 +228,7 @@ try {
                 );
             }
 
+
             if (
                 !inventory.includes(
                     "src/math.test.ts"
@@ -232,6 +238,7 @@ try {
                     "Repository inventory does not contain src/math.test.ts"
                 );
             }
+
 
             if (
                 !inventory.includes(
@@ -254,6 +261,7 @@ try {
                 );
             }
 
+
             if (
                 !contextPaths.includes(
                     "src/math.test.ts"
@@ -263,6 +271,7 @@ try {
                     "Model context does not contain read-only src/math.test.ts"
                 );
             }
+
 
             if (
                 !contextPaths.includes(
@@ -288,6 +297,7 @@ try {
                 );
             }
 
+
             if (
                 inventory.includes(
                     "src/secrets/key.ts"
@@ -305,14 +315,17 @@ try {
             contextObserved =
                 true;
 
+
             console.log(
                 "\nRepository context supplied to Qwen:"
             );
+
 
             console.log(
                 JSON.stringify(
                     {
                         inventory,
+
                         repositoryFiles:
                             contextPaths
                     },
@@ -343,6 +356,7 @@ try {
                 const previousVerification =
                     prompt.previousVerification;
 
+
                 if (
                     !previousVerification ||
                     previousVerification.passed !==
@@ -360,10 +374,11 @@ try {
                         ?.find(
                             check =>
                                 check.id ===
-                                "runtime" &&
+                                    "runtime" &&
                                 check.passed ===
-                                false
+                                    false
                         );
+
 
                 if (!failedRuntime) {
                     throw new Error(
@@ -377,7 +392,7 @@ try {
                         failedRuntime.stderr ??
                         ""
                     ).includes(
-                        "expected 0"
+                        "__GAME_FACTORY_REPAIR_FAULT__"
                     )
                 ) {
                     throw new Error(
@@ -392,6 +407,7 @@ try {
                             file.path ===
                             "src/math.ts"
                     );
+
 
                 if (
                     !mathFile ||
@@ -424,6 +440,7 @@ try {
                 repairPromptObserved =
                     true;
 
+
                 console.log(
                     "\nPASS repair prompt contains previous verifier failure and failed worktree state"
                 );
@@ -436,6 +453,61 @@ try {
                 );
 
 
+            const edits =
+                Array.isArray(
+                    response.data
+                        ?.edits
+                )
+                    ? response.data.edits
+                    : [];
+
+
+            console.log(
+                `\nQwen surgical edits for attempt ${prompt.attempt}:`
+            );
+
+
+            console.log(
+                JSON.stringify(
+                    edits.map(
+                        edit => ({
+                            operation:
+                                edit.operation,
+
+                            path:
+                                edit.path,
+
+                            oldTextLength:
+                                typeof edit.oldText ===
+                                    "string"
+                                    ? edit.oldText.length
+                                    : null,
+
+                            newTextLength:
+                                typeof edit.newText ===
+                                    "string"
+                                    ? edit.newText.length
+                                    : null,
+
+                            anchorLength:
+                                typeof edit.anchor ===
+                                    "string"
+                                    ? edit.anchor.length
+                                    : null,
+
+                            contentLength:
+                                typeof edit.content ===
+                                    "string"
+                                    ? edit.content.length
+                                    : null
+                        })
+                    ),
+                    null,
+                    2
+                )
+            );
+
+
             if (
                 repairMode &&
                 prompt.attempt ===
@@ -444,10 +516,23 @@ try {
                 injectedFaults +=
                     1;
 
+
                 console.log(
                     "\nInjecting deterministic logical fault after initial Qwen response..."
                 );
 
+
+                /*
+                * Append a second surgical replacement after Qwen's
+                * real edits.
+                *
+                * src/math.ts starts with this stable add() implementation
+                * and the task explicitly requires preserving it.
+                *
+                * Breaking add() gives us a deterministic runtime RED
+                * without replacing the complete file and without making
+                * TypeScript invalid.
+                */
                 return {
                     ...response,
 
@@ -456,34 +541,31 @@ try {
                             `${response.data.summary} [deterministic repair fault injected]`,
 
                         edits: [
+                            ...edits,
+
                             {
                                 operation:
-                                    "write",
+                                    "replace",
 
                                 path:
                                     "src/math.ts",
 
                                 content:
+                                    "",
+
+                                oldText:
+                                    "    return left + right;",
+
+                                newText:
                                     [
-                                        "export function add(",
-                                        "    left: number,",
-                                        "    right: number",
-                                        "): number {",
-                                        "    return left + right;",
-                                        "}",
-                                        "",
-                                        "export function clamp(",
-                                        "    value: number,",
-                                        "    min: number,",
-                                        "    max: number",
-                                        "): number {",
                                         "    /* __GAME_FACTORY_REPAIR_FAULT__ */",
-                                        "    return value;",
-                                        "}",
-                                        ""
+                                        '    throw new Error("__GAME_FACTORY_REPAIR_FAULT__");'
                                     ].join(
                                         "\n"
-                                    )
+                                    ),
+
+                                anchor:
+                                    ""
                             }
                         ]
                     }

@@ -42,6 +42,8 @@ export interface SurgicalDeleteFileEdit {
 export type SurgicalFileEdit =
     | SurgicalCreateFileEdit
     | SurgicalReplaceEdit
+    | SurgicalInsertBeforeEdit
+    | SurgicalInsertAfterEdit
     | SurgicalDeleteFileEdit;
 
 
@@ -92,6 +94,39 @@ interface MutableFileState {
     currentContent:
         string | null;
 }
+
+export interface SurgicalInsertBeforeEdit {
+    operation:
+        "insert_before";
+
+    path:
+        string;
+
+    anchor:
+        string;
+
+    content:
+        string;
+}
+
+
+export interface SurgicalInsertAfterEdit {
+    operation:
+        "insert_after";
+
+    path:
+        string;
+
+    anchor:
+        string;
+
+    content:
+        string;
+}
+
+
+const MAX_SURGICAL_REPLACE_COVERAGE =
+    0.8;
 
 
 /**
@@ -237,18 +272,6 @@ export function planSurgicalEdits(
 
 
             case "replace": {
-                validateString(
-                    edit.oldText,
-                    `replace oldText for ${path}`
-                );
-
-
-                validateString(
-                    edit.newText,
-                    `replace newText for ${path}`
-                );
-
-
                 if (
                     state.currentContent ===
                     null
@@ -278,9 +301,36 @@ export function planSurgicalEdits(
                     );
                 }
 
+
+                /*
+                * Capture the current virtual state once.
+                *
+                * All validation below must be calculated against the file
+                * BEFORE this replacement is applied.
+                */
+                const currentContent =
+                    state.currentContent;
+
+
+                const normalizedCurrentContent =
+                    normalizeNewlines(
+                        currentContent
+                    );
+
+
+                const normalizedOldText =
+                    normalizeNewlines(
+                        edit.oldText
+                    );
+
+
+                /*
+                * Treat LF and CRLF as equivalent for the complete-file
+                * rewrite guard.
+                */
                 if (
-                    edit.oldText ===
-                    state.currentContent
+                    normalizedOldText ===
+                    normalizedCurrentContent
                 ) {
                     throw new Error(
                         `Surgical replace must not replace the complete existing file: ${path}`
@@ -288,39 +338,158 @@ export function planSurgicalEdits(
                 }
 
 
-                const occurrences =
-                    countOccurrences(
-                        state.currentContent,
-                        edit.oldText
+                /*
+                * Resolve the real source range first.
+                *
+                * findUniqueTextRange still requires exact text apart from
+                * newline representation.
+                */
+                const match =
+                    findUniqueTextRange(
+                        currentContent,
+                        edit.oldText,
+                        path,
+                        "replace"
                     );
 
 
+                /*
+                * Coverage is based on logical text, not the replacement
+                * result and not platform-specific CRLF byte/character count.
+                *
+                * This check MUST happen before currentContent is modified.
+                */
+                const replacementCoverage =
+                    normalizedOldText.length /
+                    normalizedCurrentContent.length;
+
+
                 if (
-                    occurrences ===
-                    0
+                    replacementCoverage >
+                    MAX_SURGICAL_REPLACE_COVERAGE
                 ) {
                     throw new Error(
-                        `Surgical replace anchor was not found: ${path}`
+                        [
+                            `Surgical replace anchor covers too much of the existing file: ${path}`,
+                            `coverage=${(
+                                replacementCoverage *
+                                100
+                            ).toFixed(
+                                1
+                            )}%`,
+                            `limit=${(
+                                MAX_SURGICAL_REPLACE_COVERAGE *
+                                100
+                            ).toFixed(
+                                1
+                            )}%`
+                        ].join(
+                            " "
+                        )
                     );
                 }
 
 
-                if (
-                    occurrences >
-                    1
-                ) {
-                    throw new Error(
-                        `Surgical replace anchor is ambiguous (${occurrences} matches): ${path}`
+                const replacement =
+                    adaptReplacementNewlines(
+                        edit.newText,
+                        currentContent,
+                        match.start,
+                        match.end
                     );
-                }
 
 
                 state.currentContent =
-                    replaceExactOnce(
-                        state.currentContent,
-                        edit.oldText,
-                        edit.newText
+                    currentContent.slice(
+                        0,
+                        match.start
+                    ) +
+                    replacement +
+                    currentContent.slice(
+                        match.end
                     );
+
+
+                break;
+            }
+
+            case "insert_before":
+            case "insert_after": {
+                if (
+                    state.currentContent ===
+                    null
+                ) {
+                    throw new Error(
+                        `Surgical insert requires an existing file: ${path}`
+                    );
+                }
+
+
+                if (
+                    edit.anchor.length ===
+                    0
+                ) {
+                    throw new Error(
+                        `Surgical insert anchor must not be empty: ${path}`
+                    );
+                }
+
+
+                if (
+                    edit.content.length ===
+                    0
+                ) {
+                    throw new Error(
+                        `Surgical insert content must not be empty: ${path}`
+                    );
+                }
+
+
+                /*
+                * Capture the narrowed value once.
+                *
+                * state.currentContent is mutable state, so TypeScript does not
+                * reliably preserve its string narrowing across subsequent calls.
+                */
+                const currentContent =
+                    state.currentContent;
+
+
+                const match =
+                    findUniqueTextRange(
+                        currentContent,
+                        edit.anchor,
+                        path,
+                        "insert"
+                    );
+
+
+                const insertion =
+                    adaptReplacementNewlines(
+                        edit.content,
+                        currentContent,
+                        match.start,
+                        match.end
+                    );
+
+
+                const insertAt =
+                    edit.operation ===
+                        "insert_before"
+                        ? match.start
+                        : match.end;
+
+
+                state.currentContent =
+                    currentContent.slice(
+                        0,
+                        insertAt
+                    ) +
+                    insertion +
+                    currentContent.slice(
+                        insertAt
+                    );
+
 
                 break;
             }
@@ -612,4 +781,392 @@ function validateString(
             `${name} must be a string`
         );
     }
+}
+
+interface TextRange {
+    start:
+        number;
+
+    end:
+        number;
+}
+
+
+interface NormalizedText {
+    text:
+        string;
+
+    offsets:
+        readonly number[];
+}
+
+
+function findUniqueTextRange(
+    content:
+        string,
+
+    needle:
+        string,
+
+    path:
+        string,
+
+    kind:
+        "replace" |
+        "insert"
+): TextRange {
+    const exactMatches =
+        findAllOccurrences(
+            content,
+            needle
+        );
+
+
+    if (
+        exactMatches.length ===
+        1
+    ) {
+        const start =
+            exactMatches[0]!;
+
+
+        return {
+            start,
+
+            end:
+                start +
+                needle.length
+        };
+    }
+
+
+    if (
+        exactMatches.length >
+        1
+    ) {
+        throw new Error(
+            kind ===
+                "replace"
+                ? `Surgical replace anchor is ambiguous: ${path}`
+                : `Surgical insert anchor is ambiguous: ${path}`
+        );
+    }
+
+
+    /*
+     * LF and CRLF are two encodings of the same textual
+     * line boundary. This is the only normalization allowed
+     * here. Spaces, tabs and all non-newline characters still
+     * require exact equality.
+     */
+    if (
+        !containsLineBreak(
+            needle
+        )
+    ) {
+        throw new Error(
+            kind ===
+                "replace"
+                ? `Surgical replace anchor was not found: ${path}`
+                : `Surgical insert anchor was not found: ${path}`
+        );
+    }
+
+
+    const normalizedContent =
+        normalizeNewlinesWithOffsets(
+            content
+        );
+
+
+    const normalizedNeedle =
+        normalizeNewlines(
+            needle
+        );
+
+
+    const normalizedMatches =
+        findAllOccurrences(
+            normalizedContent.text,
+            normalizedNeedle
+        );
+
+
+    if (
+        normalizedMatches.length ===
+        0
+    ) {
+        throw new Error(
+            kind ===
+                "replace"
+                ? `Surgical replace anchor was not found: ${path}`
+                : `Surgical insert anchor was not found: ${path}`
+        );
+    }
+
+
+    if (
+        normalizedMatches.length >
+        1
+    ) {
+        throw new Error(
+            kind ===
+                "replace"
+                ? `Surgical replace anchor is ambiguous: ${path}`
+                : `Surgical insert anchor is ambiguous: ${path}`
+        );
+    }
+
+
+    const normalizedStart =
+        normalizedMatches[0]!;
+
+
+    const normalizedEnd =
+        normalizedStart +
+        normalizedNeedle.length;
+
+
+    const start =
+        normalizedContent
+            .offsets[
+                normalizedStart
+            ];
+
+
+    const end =
+        normalizedContent
+            .offsets[
+                normalizedEnd
+            ];
+
+
+    if (
+        start ===
+            undefined ||
+        end ===
+            undefined
+    ) {
+        throw new Error(
+            `Unable to map normalized surgical edit range: ${path}`
+        );
+    }
+
+
+    return {
+        start,
+        end
+    };
+}
+
+
+function findAllOccurrences(
+    content:
+        string,
+
+    needle:
+        string
+): number[] {
+    const result:
+        number[] = [];
+
+
+    let offset =
+        0;
+
+
+    while (
+        offset <=
+        content.length -
+            needle.length
+    ) {
+        const found =
+            content.indexOf(
+                needle,
+                offset
+            );
+
+
+        if (
+            found <
+            0
+        ) {
+            break;
+        }
+
+
+        result.push(
+            found
+        );
+
+
+        /*
+         * Preserve overlapping-match detection.
+         */
+        offset =
+            found +
+            1;
+    }
+
+
+    return result;
+}
+
+
+function containsLineBreak(
+    value:
+        string
+): boolean {
+    return (
+        value.includes(
+            "\n"
+        ) ||
+        value.includes(
+            "\r"
+        )
+    );
+}
+
+
+function normalizeNewlines(
+    value:
+        string
+): string {
+    return value.replace(
+        /\r\n|\r/g,
+        "\n"
+    );
+}
+
+
+function normalizeNewlinesWithOffsets(
+    value:
+        string
+): NormalizedText {
+    let text =
+        "";
+
+
+    const offsets:
+        number[] = [];
+
+
+    let sourceIndex =
+        0;
+
+
+    while (
+        sourceIndex <
+        value.length
+    ) {
+        offsets.push(
+            sourceIndex
+        );
+
+
+        if (
+            value[sourceIndex] ===
+                "\r" &&
+            value[sourceIndex + 1] ===
+                "\n"
+        ) {
+            text +=
+                "\n";
+
+            sourceIndex +=
+                2;
+
+            continue;
+        }
+
+
+        if (
+            value[sourceIndex] ===
+            "\r"
+        ) {
+            text +=
+                "\n";
+
+            sourceIndex +=
+                1;
+
+            continue;
+        }
+
+
+        text +=
+            value[sourceIndex];
+
+        sourceIndex +=
+            1;
+    }
+
+
+    offsets.push(
+        value.length
+    );
+
+
+    return {
+        text,
+        offsets
+    };
+}
+
+
+function adaptReplacementNewlines(
+    value:
+        string,
+
+    currentContent:
+        string,
+
+    start:
+        number,
+
+    end:
+        number
+): string {
+    if (
+        !containsLineBreak(
+            value
+        )
+    ) {
+        return value;
+    }
+
+
+    const matched =
+        currentContent.slice(
+            start,
+            end
+        );
+
+
+    const useCrLf =
+        matched.includes(
+            "\r\n"
+        ) ||
+        (
+            !matched.includes(
+                "\n"
+            ) &&
+            currentContent.includes(
+                "\r\n"
+            )
+        );
+
+
+    const normalized =
+        normalizeNewlines(
+            value
+        );
+
+
+    return useCrLf
+        ? normalized.replace(
+            /\n/g,
+            "\r\n"
+        )
+        : normalized;
 }

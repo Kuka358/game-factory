@@ -77,6 +77,9 @@ const targets = [
     "packages/engine-phaser/src/templates/platformer/PlatformerLevelGenerator.ts"
 ];
 
+const baselineFixtureRevision =
+    "dae2d9961d964b15a9cbfea60f1d84288de969ea";
+
 
 const baseUrl =
     process.env.LM_STUDIO_BASE_URL ??
@@ -195,6 +198,66 @@ try {
         true;
 
 
+    const worktreeSourceHead =
+        await getHead(
+            dogfoodRepositoryRoot
+        );
+
+
+    if (
+        worktreeSourceHead !==
+        sourceHead
+    ) {
+        throw new Error(
+            "Dogfood worktree did not start from source HEAD"
+        );
+    }
+
+
+    /*
+    * This dogfood originally produced the shared jump-height
+    * refactor itself. The production branch now already contains
+    * that accepted refactor, so simply cloning current HEAD would
+    * make the architecture baseline GREEN before Qwen runs.
+    *
+    * Keep the rest of the repository at current HEAD, but restore
+    * only the three explicit dogfood targets to the historical
+    * pre-refactor state. This makes the fixture repeatable while
+    * still exercising the current autonomy implementation and
+    * current repository context.
+    */
+    await runGit(
+        dogfoodRepositoryRoot,
+        [
+            "restore",
+            "--source",
+            baselineFixtureRevision,
+            "--",
+            ...targets
+        ]
+    );
+
+
+    await runGit(
+        dogfoodRepositoryRoot,
+        [
+            "add",
+            "--",
+            ...targets
+        ]
+    );
+
+
+    await runGit(
+        dogfoodRepositoryRoot,
+        [
+            "commit",
+            "-m",
+            "test: seed platformer physics dogfood baseline"
+        ]
+    );
+
+
     const dogfoodInitialHead =
         await getHead(
             dogfoodRepositoryRoot
@@ -202,13 +265,44 @@ try {
 
 
     if (
-        dogfoodInitialHead !==
+        dogfoodInitialHead ===
         sourceHead
     ) {
         throw new Error(
-            "Dogfood worktree did not start from source HEAD"
+            "Dogfood baseline fixture commit was not created"
         );
     }
+
+
+    const baselineStatus =
+        await runGitOutput(
+            dogfoodRepositoryRoot,
+            [
+                "status",
+                "--porcelain",
+                "--untracked-files=all"
+            ]
+        );
+
+
+    if (
+        baselineStatus !==
+        ""
+    ) {
+        throw new Error(
+            `Dogfood baseline fixture is dirty:\n${baselineStatus}`
+        );
+    }
+
+
+    console.log(
+        `Seeded historical dogfood baseline: ${baselineFixtureRevision}`
+    );
+
+
+    console.log(
+        `Dogfood baseline commit: ${dogfoodInitialHead}`
+    );
 
 
     console.log(
@@ -338,7 +432,7 @@ try {
             }
 
 
-            const requiredArchitectureContext = [
+            const initialArchitectureContext = [
                 "packages/runtime/package.json",
                 "packages/runtime/src/index.ts",
                 "packages/engine-phaser/package.json",
@@ -346,24 +440,67 @@ try {
             ];
 
 
-            for (
-                const path of
-                requiredArchitectureContext
+            /*
+            * Repository-intelligence coverage is asserted on the initial
+            * coding request.
+            *
+            * Repair requests may contain verifier diagnostics and repair
+            * instructions that legitimately consume more of the model
+            * context budget. Optional architectural context is therefore
+            * allowed to be trimmed on later attempts.
+            *
+            * The three production targets above remain mandatory on every
+            * attempt.
+            */
+            if (
+                prompt.attempt ===
+                1
             ) {
-                if (
-                    !contextPaths.includes(
-                        path
-                    )
+                for (
+                    const path of
+                    initialArchitectureContext
                 ) {
-                    throw new Error(
-                        `Qwen repository intelligence context is missing: ${path}`
+                    if (
+                        !contextPaths.includes(
+                            path
+                        )
+                    ) {
+                        throw new Error(
+                            `Qwen initial repository intelligence context is missing: ${path}`
+                        );
+                    }
+                }
+
+
+                contextObserved =
+                    true;
+            } else {
+                const omittedArchitectureContext =
+                    initialArchitectureContext.filter(
+                        path =>
+                            !contextPaths.includes(
+                                path
+                            )
+                    );
+
+
+                if (
+                    omittedArchitectureContext.length >
+                    0
+                ) {
+                    console.log(
+                        "Repair context omitted optional repository-intelligence files:"
+                    );
+
+                    console.log(
+                        JSON.stringify(
+                            omittedArchitectureContext,
+                            null,
+                            2
+                        )
                     );
                 }
             }
-
-
-            contextObserved =
-                true;
 
 
             console.log(
@@ -380,11 +517,20 @@ try {
 
 
             if (
-                prompt.attempt >
-                    1
+                prompt.previousVerification
             ) {
                 console.log(
                     "Repair attempt received previous deterministic verifier feedback"
+                );
+            } else if (
+                Array.isArray(
+                    prompt.repairInstructions
+                ) &&
+                prompt.repairInstructions.length >
+                    0
+            ) {
+                console.log(
+                    "Repair attempt received previous surgical patch feedback"
                 );
             }
 
@@ -427,7 +573,31 @@ try {
                                 edit.operation,
 
                             path:
-                                edit.path
+                                edit.path,
+
+                            oldTextLength:
+                                typeof edit.oldText ===
+                                    "string"
+                                    ? edit.oldText.length
+                                    : null,
+
+                            newTextLength:
+                                typeof edit.newText ===
+                                    "string"
+                                    ? edit.newText.length
+                                    : null,
+
+                            anchorLength:
+                                typeof edit.anchor ===
+                                    "string"
+                                    ? edit.anchor.length
+                                    : null,
+
+                            contentLength:
+                                typeof edit.content ===
+                                    "string"
+                                    ? edit.content.length
+                                    : null
                         })
                     ),
                     null,
@@ -436,23 +606,75 @@ try {
             );
 
 
-            const hazardEdit =
-                edits.find(
+            const hazardEdits =
+                edits.filter(
                     edit =>
                         edit.path ===
-                        "packages/engine-phaser/src/templates/platformer/hazard-clearance.ts" &&
-                        edit.operation ===
-                        "write"
+                        "packages/engine-phaser/src/templates/platformer/hazard-clearance.ts"
                 );
 
 
             if (
-                hazardEdit &&
-                typeof hazardEdit.content ===
-                    "string"
+                hazardEdits.length >
+                0
             ) {
+                const relevantText =
+                    hazardEdits
+                        .flatMap(
+                            edit => {
+                                const parts = [];
+
+
+                                if (
+                                    typeof edit.oldText ===
+                                        "string"
+                                ) {
+                                    parts.push(
+                                        edit.oldText
+                                    );
+                                }
+
+
+                                if (
+                                    typeof edit.newText ===
+                                        "string"
+                                ) {
+                                    parts.push(
+                                        edit.newText
+                                    );
+                                }
+
+
+                                if (
+                                    typeof edit.anchor ===
+                                        "string"
+                                ) {
+                                    parts.push(
+                                        edit.anchor
+                                    );
+                                }
+
+
+                                if (
+                                    typeof edit.content ===
+                                        "string"
+                                ) {
+                                    parts.push(
+                                        edit.content
+                                    );
+                                }
+
+
+                                return parts;
+                            }
+                        )
+                        .join(
+                            "\n"
+                        );
+
+
                 const relevantLines =
-                    hazardEdit.content
+                    relevantText
                         .split(
                             /\r?\n/
                         )
@@ -476,6 +698,7 @@ try {
                 console.log(
                     "Qwen hazard math:"
                 );
+
 
                 console.log(
                     relevantLines.join(
@@ -733,7 +956,7 @@ try {
         ],
 
         maxLocalAttempts:
-            2,
+            4,
 
         escalation: {
             onRepeatedFailure:
@@ -865,6 +1088,7 @@ try {
                 context
             );
 
+
             const failedChecks =
                 context.verification
                     .checks
@@ -874,80 +1098,123 @@ try {
                     );
 
 
-            const runtimeRegression =
-                failedChecks.some(
-                    check =>
-                        check.id ===
-                            "runtime" &&
-                        (
-                            check.stderr ??
-                            check.stdout ??
-                            ""
-                        ).includes(
-                            "narrow-speed hazard clearance changed"
-                        )
-                );
-
-
-            if (runtimeRegression) {
+            if (
+                failedChecks.length ===
+                0
+            ) {
                 return {
                     type:
-                        "repair",
+                        "abort",
 
-                    instructions: [
-                        [
-                            "The deterministic runtime verifier proves that hazard-clearance behaviour changed.",
-                            "Expected hazardHeightAboveSurface({ jump_force: 560, move_speed: 100 }) to remain 12.",
-                            "The current result is incorrect."
-                        ].join(
-                            " "
-                        ),
-
-                        [
-                            "In hazard-clearance.ts, the ONLY intended semantic change is replacing the theoretical idealRise formula",
-                            "`force ** 2 / (2 * ARCADE_GRAVITY_Y)`",
-                            "with `calculateArcadeJumpHeight(force)`."
-                        ].join(
-                            " "
-                        ),
-
-                        [
-                            "Restore and preserve the remaining hazard-clearance equations exactly:",
-                            "`const effectiveForce = force - ARCADE_GRAVITY_Y / (2 * ARCADE_PHYSICS_FPS);`",
-                            "`const crossingTime = (PLATFORMER_BODIES.hazard.width + PLATFORMER_BODIES.player.width) / speed + 2 / ARCADE_PHYSICS_FPS;`",
-                            "`const permittedExposure = Math.floor(effectiveForce ** 2 / (2 * ARCADE_GRAVITY_Y) - ARCADE_GRAVITY_Y * crossingTime ** 2 / 8);`"
-                        ].join(
-                            " "
-                        ),
-
-                        [
-                            "Do not simplify, reorder, approximate, or replace those formulas.",
-                            "Do not change body dimensions, FPS handling, exposure calculation, flooring, or return logic."
-                        ].join(
-                            " "
-                        ),
-
-                        "Keep all previously correct shared-helper refactor work."
-                    ]
+                    reason:
+                        "Failure advisor was invoked without failed verifier checks"
                 };
             }
 
 
+            const diagnostics =
+                failedChecks.map(
+                    check =>
+                        summarizeVerifierFailure(
+                            check
+                        )
+                );
+
+
+            /*
+            * The deterministic verifier is the source of truth.
+            *
+            * Do not hard-code a growing list of individual failure
+            * messages here. Any verifier failure after the local repair
+            * budget gets one bounded escalation repair attempt.
+            *
+            * The engine still enforces maxRepairRounds, so this cannot
+            * turn into an unlimited retry loop.
+            */
             return {
                 type:
-                    "abort",
+                    "repair",
 
-                reason:
+                instructions: [
                     [
-                        "Platformer physics dogfood failed after local repair budget.",
+                        "The deterministic verifier rejected the current isolated worktree.",
+                        "Treat the verifier diagnostics below as authoritative."
+                    ].join(
+                        " "
+                    ),
 
-                        ...failedChecks.map(
-                            check =>
-                                `${check.id}: ${check.stderr ?? check.stdout ?? "failed"}`
-                        )
+                    ...diagnostics,
+
+                    [
+                        "Re-read the current repositoryFiles before editing.",
+                        "They contain the accumulated state of all previous attempts.",
+                        "Do not rely on your earlier summaries or earlier edit anchors."
+                    ].join(
+                        " "
+                    ),
+
+                    [
+                        "Repair ALL currently failed verifier checks in one minimal surgical batch.",
+                        "Do not repeat edits whose desired final state is already present."
+                    ].join(
+                        " "
+                    ),
+
+                    [
+                        "The intended shared helper is:",
+                        "`calculateArcadeJumpHeight(jumpForce)` from `@game-factory/runtime`."
+                    ].join(
+                        " "
+                    ),
+
+                    [
+                        "packages/runtime/src/platformer-physics.ts must export calculateArcadeJumpHeight.",
+                        "Its result must remain `jumpForce * jumpForce / (2 * ARCADE_GRAVITY_Y)`."
+                    ].join(
+                        " "
+                    ),
+
+                    [
+                        "In hazard-clearance.ts, only the theoretical ideal rise should use the shared helper:",
+                        "`const idealRise = calculateArcadeJumpHeight(force);`"
+                    ].join(
+                        " "
+                    ),
+
+                    [
+                        "Preserve the hazard effectiveForce, crossingTime and permittedExposure behaviour.",
+                        "In particular, permittedExposure must keep the original effectiveForce formula and must not be rewritten to calculateArcadeJumpHeight(effectiveForce)."
+                    ].join(
+                        " "
+                    ),
+
+                    [
+                        "PlatformerLevelGenerator.ts must import calculateArcadeJumpHeight from @game-factory/runtime exactly once and use it in calculateMaximumSafeRise()."
+                    ].join(
+                        " "
+                    ),
+
+                    [
+                        "calculateMaximumSafeRise() must use:",
+                        "`const theoretical = calculateArcadeJumpHeight(jumpForce);`",
+                        "and the existing 0.65 safety factor must be applied exactly once."
+                    ].join(
+                        " "
+                    ),
+
+                    [
+                        "ARCADE_GRAVITY_Y must remain available in PlatformerLevelGenerator.ts because calculateMaximumSafeHorizontalGap() still uses it."
+                    ].join(
+                        " "
+                    ),
+
+                    [
+                        "Do not rewrite unrelated code, formatting, comments or functions.",
+                        "Make the smallest surgical repair necessary."
                     ].join(
                         " "
                     )
+                ]
             };
         }
     };
@@ -1277,7 +1544,7 @@ try {
         );
 
 
-    const leakedInnerWorktree =
+    const registeredWorktreePaths =
         worktreeList
             .split(
                 /\r?\n/
@@ -1293,24 +1560,98 @@ try {
                     line.slice(
                         "worktree ".length
                     )
-            )
-            .some(
-                path =>
-                    path.includes(
-                        ".game-factory"
-                    ) &&
-                    path.includes(
-                        "autonomy"
-                    ) &&
-                    path.includes(
-                        "worktrees"
-                    )
             );
 
 
-    if (leakedInnerWorktree) {
+    const currentInternalWorktreeRoot =
+        normalizeFilesystemPath(
+            join(
+                dogfoodRepositoryRoot,
+                ".game-factory",
+                "autonomy",
+                "worktrees"
+            )
+        );
+
+
+    const currentLeakedInnerWorktrees =
+        registeredWorktreePaths.filter(
+            path => {
+                const normalized =
+                    normalizeFilesystemPath(
+                        path
+                    );
+
+
+                return (
+                    normalized ===
+                        currentInternalWorktreeRoot ||
+                    normalized.startsWith(
+                        `${currentInternalWorktreeRoot}/`
+                    )
+                );
+            }
+        );
+
+
+    if (
+        currentLeakedInnerWorktrees.length >
+        0
+    ) {
         throw new Error(
-            "Autonomy left an internal isolated worktree registered"
+            [
+                "Autonomy left an internal isolated worktree registered for the current dogfood run:",
+
+                ...currentLeakedInnerWorktrees
+            ].join(
+                "\n"
+            )
+        );
+    }
+
+
+    /*
+    * Historical failed/debug dogfood runs may deliberately still
+    * exist. They must not make an unrelated successful run fail.
+    *
+    * Report them for cleanup without treating them as a leak from
+    * this transaction.
+    */
+    const historicalInternalWorktrees =
+        registeredWorktreePaths.filter(
+            path => {
+                const normalized =
+                    normalizeFilesystemPath(
+                        path
+                    );
+
+
+                return (
+                    normalized.includes(
+                        "/.game-factory/autonomy/worktrees/"
+                    ) &&
+                    !currentLeakedInnerWorktrees.includes(
+                        path
+                    )
+                );
+            }
+        );
+
+
+    if (
+        historicalInternalWorktrees.length >
+        0
+    ) {
+        console.log(
+            "\nHistorical internal autonomy worktrees are still registered:"
+        );
+
+        console.log(
+            JSON.stringify(
+                historicalInternalWorktrees,
+                null,
+                2
+            )
         );
     }
 
@@ -1598,5 +1939,80 @@ async function runGitOutput(
 
     return String(
         result.stdout
+    );
+}
+
+function normalizeFilesystemPath(
+    value
+) {
+    const normalized =
+        resolve(
+            value
+        ).replaceAll(
+            "\\",
+            "/"
+        );
+
+
+    return process.platform ===
+        "win32"
+        ? normalized.toLowerCase()
+        : normalized;
+}
+
+function summarizeVerifierFailure(
+    check
+) {
+    const raw =
+        String(
+            check.stderr ??
+            check.stdout ??
+            "failed"
+        ).trim();
+
+
+    const lines =
+        raw.split(
+            /\r?\n/
+        );
+
+
+    const errorLine =
+        lines.find(
+            line =>
+                line.trim()
+                    .startsWith(
+                        "Error:"
+                    )
+        );
+
+
+    if (
+        errorLine
+    ) {
+        return [
+            `Verifier check "${check.id}" failed.`,
+            errorLine.trim()
+        ].join(
+            " "
+        );
+    }
+
+
+    const compact =
+        raw.length >
+            1_500
+            ? `${raw.slice(
+                0,
+                1_500
+            )}...`
+            : raw;
+
+
+    return [
+        `Verifier check "${check.id}" failed.`,
+        compact
+    ].join(
+        " "
     );
 }

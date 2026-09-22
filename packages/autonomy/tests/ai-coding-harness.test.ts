@@ -137,7 +137,10 @@ describe(
                                             "existing = 1",
 
                                         newText:
-                                            "existing = 2"
+                                            "existing = 2",
+
+                                        anchor:
+                                            ""
                                     },
 
                                     {
@@ -154,6 +157,9 @@ describe(
                                             "",
 
                                         newText:
+                                            "",
+
+                                        anchor:
                                             ""
                                     }
                                 ]
@@ -515,7 +521,10 @@ describe(
                                             "helper = 42",
 
                                         newText:
-                                            "helper = 999"
+                                            "helper = 999",
+
+                                        anchor:
+                                            ""
                                     }
                                 ]
                             },
@@ -1037,10 +1046,6 @@ describe(
                                     5
                             },
 
-                            /*
-                             * Keep this test independent from prompt
-                             * wording and schema size.
-                             */
                             tokenEstimator: {
                                 estimateTokens() {
                                     return 10;
@@ -1221,10 +1226,6 @@ describe(
                                     0
                             },
 
-                            /*
-                             * Three estimated prompt components:
-                             * system + user + schema = 30 raw tokens.
-                             */
                             tokenEstimator: {
                                 estimateTokens() {
                                     return 10;
@@ -1300,11 +1301,6 @@ describe(
                     );
 
 
-                    /*
-                     * actual/raw = 60/30 = 2.
-                     * Default headroom would request 2.2, but the
-                     * calibration default max multiplier is 2.
-                     */
                     expect(
                         observations[0]
                             ?.nextMultiplier
@@ -1399,6 +1395,9 @@ describe(
                                         "",
 
                                     newText:
+                                        "",
+
+                                    anchor:
                                         ""
                                 }
                             ]
@@ -1487,6 +1486,9 @@ describe(
                                         "",
 
                                     newText:
+                                        "",
+
+                                    anchor:
                                         ""
                                 }
                             ]
@@ -1568,6 +1570,9 @@ describe(
                                         "",
 
                                     newText:
+                                        "",
+
+                                    anchor:
                                         ""
                                 }
                             ]
@@ -1801,7 +1806,10 @@ describe(
                                         "existing = 1",
 
                                     newText:
-                                        "existing = 999"
+                                        "existing = 999",
+
+                                    anchor:
+                                        ""
                                 },
 
                                 {
@@ -1818,6 +1826,9 @@ describe(
                                         "",
 
                                     newText:
+                                        "",
+
+                                    anchor:
                                         ""
                                 }
                             ]
@@ -1844,10 +1855,6 @@ describe(
                     );
 
 
-                    /*
-                     * The first otherwise-valid edit must NOT have been
-                     * applied before the second edit was rejected.
-                     */
                     expect(
                         await readFile(
                             join(
@@ -1928,7 +1935,10 @@ describe(
                                         "helper = 42",
 
                                     newText:
-                                        "helper = 999"
+                                        "helper = 999",
+
+                                    anchor:
+                                        ""
                                 }
                             ]
                         });
@@ -2007,12 +2017,6 @@ describe(
                             request:
                                 AIRequest
                         ) {
-                            /*
-                             * Simulate another actor changing the
-                             * isolated worktree after the prompt was
-                             * constructed but before the model response
-                             * is applied.
-                             */
                             await writeFile(
                                 existingPath,
                                 "export const existing = 7;\n",
@@ -2040,7 +2044,10 @@ describe(
                                                 "existing = 1",
 
                                             newText:
-                                                "existing = 2"
+                                                "existing = 2",
+
+                                            anchor:
+                                                ""
                                         }
                                     ]
                                 } as T,
@@ -2075,10 +2082,6 @@ describe(
                     );
 
 
-                    /*
-                     * The external mutation is preserved. The stale
-                     * model response must not overwrite it.
-                     */
                     expect(
                         await readFile(
                             existingPath,
@@ -2086,6 +2089,91 @@ describe(
                         )
                     ).toBe(
                         "export const existing = 7;\n"
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+
+        it(
+            "rejects using replace as a near-complete existing-file rewrite",
+            async () => {
+                const repository =
+                    await createRepository();
+
+
+                try {
+                    const provider =
+                        createProvider({
+                            summary:
+                                "Tried near-complete rewrite",
+
+                            edits: [
+                                {
+                                    operation:
+                                        "replace",
+
+                                    path:
+                                        "src/existing.ts",
+
+                                    content:
+                                        "",
+
+                                    oldText:
+                                        "export const existing = 1;",
+
+                                    newText:
+                                        "export const existing = 2;",
+
+                                    anchor:
+                                        ""
+                                }
+                            ]
+                        });
+
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model"
+                        });
+
+
+                    await expect(
+                        harness.executeIteration(
+                            createInput(
+                                repository
+                            )
+                        )
+                    ).rejects.toThrow(
+                        "anchor covers too much"
+                    );
+
+
+                    expect(
+                        await readFile(
+                            join(
+                                repository,
+                                "src",
+                                "existing.ts"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        "export const existing = 1;\n"
                     );
                 } finally {
                     await rm(
@@ -2131,7 +2219,10 @@ describe(
                                         "export const existing = 1;\n",
 
                                     newText:
-                                        "export const existing = 2;\n"
+                                        "export const existing = 2;\n",
+
+                                    anchor:
+                                        ""
                                 }
                             ]
                         });
@@ -2184,6 +2275,436 @@ describe(
             }
         );
 
+        it(
+            "ignores irrelevant anchor returned for replace",
+            async () => {
+                const repository =
+                    await createRepository();
+
+
+                try {
+                    const provider =
+                        createProvider({
+                            summary:
+                                "Replaced source",
+
+                            edits: [
+                                {
+                                    operation:
+                                        "replace",
+
+                                    path:
+                                        "src/existing.ts",
+
+                                    content:
+                                        "",
+
+                                    oldText:
+                                        "existing = 1",
+
+                                    newText:
+                                        "existing = 2",
+
+                                    anchor:
+                                        "irrelevant structured output value"
+                                }
+                            ]
+                        });
+
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model"
+                        });
+
+
+                    await harness.executeIteration(
+                        createInput(
+                            repository
+                        )
+                    );
+
+
+                    expect(
+                        await readFile(
+                            join(
+                                repository,
+                                "src",
+                                "existing.ts"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        "export const existing = 2;\n"
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
+            "rejects conflicting replace content and newText",
+            async () => {
+                const repository =
+                    await createRepository();
+
+
+                try {
+                    const provider =
+                        createProvider({
+                            summary:
+                                "Returned conflicting replacement",
+
+                            edits: [
+                                {
+                                    operation:
+                                        "replace",
+
+                                    path:
+                                        "src/existing.ts",
+
+                                    content:
+                                        "existing = 2",
+
+                                    oldText:
+                                        "existing = 1",
+
+                                    newText:
+                                        "existing = 999",
+
+                                    anchor:
+                                        ""
+                                }
+                            ]
+                        });
+
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model"
+                        });
+
+
+                    await expect(
+                        harness.executeIteration(
+                            createInput(
+                                repository
+                            )
+                        )
+                    ).rejects.toThrow(
+                        "replace edit content and newText conflict"
+                    );
+
+
+                    expect(
+                        await readFile(
+                            join(
+                                repository,
+                                "src",
+                                "existing.ts"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        "export const existing = 1;\n"
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
+            "normalizes replace content returned instead of newText",
+            async () => {
+                const repository =
+                    await createRepository();
+
+
+                try {
+                    const provider =
+                        createProvider({
+                            summary:
+                                "Replaced source",
+
+                            edits: [
+                                {
+                                    operation:
+                                        "replace",
+
+                                    path:
+                                        "src/existing.ts",
+
+                                    content:
+                                        "existing = 2",
+
+                                    oldText:
+                                        "existing = 1",
+
+                                    newText:
+                                        "",
+
+                                    anchor:
+                                        ""
+                                }
+                            ]
+                        });
+
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model"
+                        });
+
+
+                    const result =
+                        await harness.executeIteration(
+                            createInput(
+                                repository
+                            )
+                        );
+
+
+                    expect(
+                        result.changedFiles
+                    ).toEqual([
+                        "src/existing.ts"
+                    ]);
+
+
+                    expect(
+                        await readFile(
+                            join(
+                                repository,
+                                "src",
+                                "existing.ts"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        "export const existing = 2;\n"
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
+            "rejects conflicting insert content returned in newText",
+            async () => {
+                const repository =
+                    await createRepository();
+
+
+                try {
+                    const provider =
+                        createProvider({
+                            summary:
+                                "Returned conflicting insertion",
+
+                            edits: [
+                                {
+                                    operation:
+                                        "insert_after",
+
+                                    path:
+                                        "src/existing.ts",
+
+                                    content:
+                                        "\nexport const second = 2;\n",
+
+                                    oldText:
+                                        "",
+
+                                    newText:
+                                        "\nexport const malicious = 999;\n",
+
+                                    anchor:
+                                        "export const existing = 1;\n"
+                                }
+                            ]
+                        });
+
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model"
+                        });
+
+
+                    await expect(
+                        harness.executeIteration(
+                            createInput(
+                                repository
+                            )
+                        )
+                    ).rejects.toThrow(
+                        "insert edit newText must be empty or exactly match content"
+                    );
+
+
+                    expect(
+                        await readFile(
+                            join(
+                                repository,
+                                "src",
+                                "existing.ts"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        "export const existing = 1;\n"
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
+
+        it(
+            "normalizes duplicated insert content returned in newText",
+            async () => {
+                const repository =
+                    await createRepository();
+
+
+                try {
+                    const provider =
+                        createProvider({
+                            summary:
+                                "Inserted source",
+
+                            edits: [
+                                {
+                                    operation:
+                                        "insert_after",
+
+                                    path:
+                                        "src/existing.ts",
+
+                                    content:
+                                        "\nexport const second = 2;\n",
+
+                                    oldText:
+                                        "",
+
+                                    newText:
+                                        "\nexport const second = 2;\n",
+
+                                    anchor:
+                                        "export const existing = 1;\n"
+                                }
+                            ]
+                        });
+
+
+                    const harness =
+                        new AICodingHarness({
+                            provider,
+
+                            model:
+                                "test-model"
+                        });
+
+
+                    const result =
+                        await harness.executeIteration(
+                            createInput(
+                                repository
+                            )
+                        );
+
+
+                    expect(
+                        result.changedFiles
+                    ).toEqual([
+                        "src/existing.ts"
+                    ]);
+
+
+                    expect(
+                        await readFile(
+                            join(
+                                repository,
+                                "src",
+                                "existing.ts"
+                            ),
+                            "utf8"
+                        )
+                    ).toBe(
+                        [
+                            "export const existing = 1;",
+                            "",
+                            "export const second = 2;",
+                            ""
+                        ].join(
+                            "\n"
+                        )
+                    );
+                } finally {
+                    await rm(
+                        repository,
+                        {
+                            recursive:
+                                true,
+
+                            force:
+                                true
+                        }
+                    );
+                }
+            }
+        );
 
         it(
             "rejects malformed delete edits returned by the model",
@@ -2213,6 +2734,9 @@ describe(
                                         "",
 
                                     newText:
+                                        "",
+
+                                    anchor:
                                         ""
                                 }
                             ]
@@ -2235,13 +2759,10 @@ describe(
                             )
                         )
                     ).rejects.toThrow(
-                        "delete edit must use empty content oldText and newText"
+                        "delete edit must use empty content oldText newText and anchor"
                     );
 
 
-                    /*
-                     * Validation occurs before any edit is applied.
-                     */
                     expect(
                         await readFile(
                             join(
@@ -2283,6 +2804,8 @@ function createProvider(
                     operation:
                         "create" |
                         "replace" |
+                        "insert_before" |
+                        "insert_after" |
                         "delete";
 
                     path:
@@ -2295,6 +2818,9 @@ function createProvider(
                         string;
 
                     newText:
+                        string;
+
+                    anchor:
                         string;
                 }[];
         },

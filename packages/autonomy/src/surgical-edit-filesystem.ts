@@ -339,6 +339,39 @@ export class SurgicalEditApplicator
             switch (
                 edit.operation
             ) {
+                case "insert_before":
+                    result.push({
+                        operation:
+                            "insert_before",
+
+                        path,
+
+                        anchor:
+                            edit.anchor,
+
+                        content:
+                            edit.content
+                    });
+
+                    break;
+
+
+                case "insert_after":
+                    result.push({
+                        operation:
+                            "insert_after",
+
+                        path,
+
+                        anchor:
+                            edit.anchor,
+
+                        content:
+                            edit.content
+                    });
+
+                    break;
+
                 case "create":
                     result.push({
                         operation:
