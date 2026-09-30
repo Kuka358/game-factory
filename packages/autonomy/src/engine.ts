@@ -10,7 +10,9 @@ import type {
     CheckpointManager,
     CodingWorker,
     FailureAdvisor,
+    FailureDecision,
     Planner,
+    RepairAdvisor,
     Verifier,
     WorkerResult
 } from "./providers.js";
@@ -39,6 +41,22 @@ import {
     isRetryableCodingHarnessError
 } from "./harness.js";
 
+import {
+    DeterministicRepairContextBuilder
+} from "./repair-context.js";
+
+import type {
+    RepairContextBuilder
+} from "./repair-context.js";
+
+import type {
+    RepairExecutionPlan
+} from "./repair-plan.js";
+
+import {
+    assertRepairPlanMatchesContext
+} from "./repair-advisor.js";
+
 export interface AutonomyEngineDependencies {
     planner:
         Planner;
@@ -49,7 +67,27 @@ export interface AutonomyEngineDependencies {
     verifier:
         Verifier;
 
-    failureAdvisor:
+    /**
+     * Structured escalation path.
+     *
+     * When present, the engine prefers RepairAdvisor over the
+     * legacy FailureAdvisor.
+     */
+    repairAdvisor?:
+        RepairAdvisor;
+
+    /**
+     * Optional injectable builder primarily useful for testing
+     * and alternative bounded-context policies.
+     */
+    repairContextBuilder?:
+        RepairContextBuilder;
+
+    /**
+     * Legacy escalation provider kept during the migration to
+     * structured RepairPlan.
+     */
+    failureAdvisor?:
         FailureAdvisor;
 
     runStore?:
@@ -70,6 +108,26 @@ export interface RunExecutionOptions {
         boolean;
 }
 
+interface EscalationRequestInput {
+    run:
+        AutonomousRun;
+
+    contract:
+        IterationContract;
+
+    record:
+        IterationRecord;
+
+    attempts:
+        number;
+
+    verification:
+        VerificationReport;
+
+    workerResult:
+        WorkerResult;
+}
+
 
 type IterationExecutionResult =
     | "completed"
@@ -81,6 +139,9 @@ export class AutonomyEngine {
     private readonly now:
         () => string;
 
+    private readonly repairContextBuilder?:
+        RepairContextBuilder;
+
     constructor(
         private readonly dependencies:
             AutonomyEngineDependencies
@@ -90,6 +151,35 @@ export class AutonomyEngine {
             (() =>
                 new Date()
                     .toISOString());
+
+
+        if (
+            !dependencies.repairAdvisor &&
+            !dependencies.failureAdvisor
+        ) {
+            throw new Error(
+                "AutonomyEngine requires either RepairAdvisor or FailureAdvisor"
+            );
+        }
+
+
+        if (
+            dependencies.repairContextBuilder &&
+            !dependencies.repairAdvisor
+        ) {
+            throw new Error(
+                "AutonomyEngine repairContextBuilder requires RepairAdvisor"
+            );
+        }
+
+
+        if (
+            dependencies.repairAdvisor
+        ) {
+            this.repairContextBuilder =
+                dependencies.repairContextBuilder ??
+                new DeterministicRepairContextBuilder();
+        }
     }
 
 
@@ -358,6 +448,138 @@ export class AutonomyEngine {
         );
     }
 
+    private async requestEscalation(
+        input:
+            EscalationRequestInput
+    ): Promise<FailureDecision> {
+        const repairAdvisor =
+            this.dependencies
+                .repairAdvisor;
+
+
+        if (repairAdvisor) {
+            const builder =
+                this.repairContextBuilder;
+
+
+            if (!builder) {
+                throw new Error(
+                    "RepairAdvisor requires a RepairContextBuilder"
+                );
+            }
+
+
+            const context =
+                builder.build({
+                    run:
+                        input.run,
+
+                    contract:
+                        input.contract,
+
+                    attempts:
+                        input.attempts,
+
+                    attemptHistory:
+                        input.record.attempts,
+
+                    verification:
+                        input.verification,
+
+                    workerResult:
+                        input.workerResult
+                });
+
+
+            const plan =
+                await repairAdvisor
+                    .advise(
+                        context
+                    );
+
+            assertRepairPlanMatchesContext(
+                plan,
+                context
+            );
+
+
+            switch (
+                plan.strategy
+            ) {
+                case "repair":
+                    return {
+                        type:
+                            "repair",
+
+                        instructions:
+                            createRepairInstructions(
+                                plan
+                            )
+                    };
+
+
+                case "replan":
+                    return {
+                        type:
+                            "replan",
+
+                        reason:
+                            plan.reason
+                    };
+
+
+                case "architecture_required":
+                    return {
+                        type:
+                            "architecture_required",
+
+                        question:
+                            plan.question
+                    };
+
+
+                case "abort":
+                    return {
+                        type:
+                            "abort",
+
+                        reason:
+                            plan.reason
+                    };
+            }
+        }
+
+
+        const legacyAdvisor =
+            this.dependencies
+                .failureAdvisor;
+
+
+        if (!legacyAdvisor) {
+            throw new Error(
+                "No escalation advisor is configured"
+            );
+        }
+
+
+        return legacyAdvisor
+            .advise({
+                run:
+                    input.run,
+
+                contract:
+                    input.contract,
+
+                attempts:
+                    input.attempts,
+
+                verification:
+                    input.verification,
+
+                workerResult:
+                    input.workerResult
+            });
+    }
 
     private async runIteration(
         run:
@@ -736,20 +958,20 @@ export class AutonomyEngine {
                 );
 
                 const escalation =
-                    await this.dependencies
-                        .failureAdvisor
-                        .advise({
-                            run,
+                    await this.requestEscalation({
+                        run,
 
-                            contract,
+                        contract,
 
-                            attempts:
-                                attempt,
+                        record,
 
-                            verification,
+                        attempts:
+                            attempt,
 
-                            workerResult
-                        });
+                        verification,
+
+                        workerResult
+                    });
 
                 if (
                     escalation.type ===
@@ -1681,4 +1903,50 @@ function getErrorMessage(
         : String(
             error
         );
+}
+
+function createRepairInstructions(
+    plan:
+        RepairExecutionPlan
+): readonly string[] {
+    const instructions:
+        string[] = [
+            `Repair diagnosis: ${plan.diagnosis}`,
+
+            `Failed deterministic checks: ${plan.failedChecks.join(
+                ", "
+            )}`,
+
+            ...plan.instructions
+        ];
+
+
+    if (
+        plan.filesHint.length >
+        0
+    ) {
+        instructions.push(
+            [
+                "Prioritize these files while repairing:",
+                plan.filesHint.join(
+                    ", "
+                )
+            ].join(
+                " "
+            )
+        );
+    }
+
+
+    for (
+        const invariant of
+        plan.preserve
+    ) {
+        instructions.push(
+            `Preserve: ${invariant}`
+        );
+    }
+
+
+    return instructions;
 }

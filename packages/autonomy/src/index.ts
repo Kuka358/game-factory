@@ -26,3 +26,7 @@ export * from "./model-context-budget.js";
 export * from "./model-context-profiles.js";
 export * from "./surgical-edit.js";
 export * from "./surgical-edit-filesystem.js";
+export * from "./repair-plan.js";
+export * from "./repair-context.js";
+export * from "./repair-advisor.js";
+export * from "./ai-repair-advisor.js";

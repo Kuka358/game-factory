@@ -9,6 +9,14 @@ import type {
     WorkerWorkspaceRef
 } from "./state.js";
 
+import type {
+    RepairPlan
+} from "./repair-plan.js";
+
+import type {
+    RepairContext
+} from "./repair-context.js";
+
 
 export interface PlanningInput {
     run:
@@ -170,6 +178,20 @@ export interface Verifier {
     ): Promise<VerificationReport>;
 }
 
+export interface RepairAdvisor {
+    advise(
+        context:
+            RepairContext
+    ): Promise<RepairPlan>;
+}
+
+
+export interface RepairAdvisor {
+    advise(
+        context:
+            RepairContext
+    ): Promise<RepairPlan>;
+}
 
 export interface FailureContext {
     run:

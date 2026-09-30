@@ -42,6 +42,7 @@ import {
     GitCheckpointManager,
     GitRepositoryContextDiscovery,
     IsolatedHarnessCodingWorker,
+    AIRepairAdvisor,
     createAutonomousRun
 } from "../packages/autonomy/dist/index.js";
 
@@ -69,6 +70,28 @@ const repairMode =
         "--repair"
     );
 
+
+const advisorRepairMode =
+    process.argv.includes(
+        "--advisor-repair"
+    );
+
+
+if (
+    repairMode &&
+    advisorRepairMode
+) {
+    throw new Error(
+        "--repair and --advisor-repair cannot be used together"
+    );
+}
+
+
+const repairLikeMode =
+    repairMode ||
+    advisorRepairMode;
+
+
 const unknownArguments =
     process.argv
         .slice(
@@ -77,7 +100,9 @@ const unknownArguments =
         .filter(
             argument =>
                 argument !==
-                "--repair"
+                    "--repair" &&
+                argument !==
+                    "--advisor-repair"
         );
 
 if (
@@ -102,6 +127,34 @@ if (!model) {
     );
 }
 
+const repairModel =
+    process.env
+        .LM_STUDIO_REPAIR_MODEL ??
+    model;
+
+
+const repairTimeoutMs =
+    Number(
+        process.env
+            .LM_STUDIO_REPAIR_TIMEOUT_MS ??
+        process.env
+            .LM_STUDIO_TIMEOUT_MS ??
+        "180000"
+    );
+
+
+if (
+    !Number.isFinite(
+        repairTimeoutMs
+    ) ||
+    repairTimeoutMs <=
+        0
+) {
+    throw new Error(
+        "LM Studio repair timeout must be a positive number"
+    );
+}
+
 const timeoutMs =
     Number(
         process.env
@@ -113,7 +166,8 @@ if (
     !Number.isFinite(
         timeoutMs
     ) ||
-    timeoutMs <= 0
+    timeoutMs <=
+        0
 ) {
     throw new Error(
         "LM_STUDIO_TIMEOUT_MS must be a positive number"
@@ -150,10 +204,21 @@ try {
             timeoutMs
         });
 
+    const repairProvider =
+        new LMStudioProvider({
+            baseUrl,
+
+            timeoutMs:
+                repairTimeoutMs
+        });
+
     let contextObserved =
         false;
 
     let repairPromptObserved =
+        false;
+
+    let escalationRepairPromptObserved =
         false;
 
     let injectedFaults =
@@ -161,6 +226,12 @@ try {
 
     let failureAdvisorCalls =
         0;
+
+    let repairAdvisorCalls =
+        0;
+
+    let lastRepairPlan =
+        null;
 
 
     const observedProvider = {
@@ -230,28 +301,6 @@ try {
 
 
             if (
-                !inventory.includes(
-                    "src/math.test.ts"
-                )
-            ) {
-                throw new Error(
-                    "Repository inventory does not contain src/math.test.ts"
-                );
-            }
-
-
-            if (
-                !inventory.includes(
-                    "src/helper.ts"
-                )
-            ) {
-                throw new Error(
-                    "Repository inventory does not contain src/helper.ts"
-                );
-            }
-
-
-            if (
                 !contextPaths.includes(
                     "src/math.ts"
                 )
@@ -261,26 +310,76 @@ try {
                 );
             }
 
+            if (!advisorRepairMode) {
+                if (
+                    !inventory.includes(
+                        "src/math.test.ts"
+                    )
+                ) {
+                    throw new Error(
+                        "Repository inventory does not contain src/math.test.ts"
+                    );
+                }
 
-            if (
-                !contextPaths.includes(
-                    "src/math.test.ts"
-                )
-            ) {
-                throw new Error(
-                    "Model context does not contain read-only src/math.test.ts"
-                );
-            }
+
+                if (
+                    !inventory.includes(
+                        "src/helper.ts"
+                    )
+                ) {
+                    throw new Error(
+                        "Repository inventory does not contain src/helper.ts"
+                    );
+                }
 
 
-            if (
-                !contextPaths.includes(
-                    "src/helper.ts"
-                )
-            ) {
-                throw new Error(
-                    "Model context does not contain read-only src/helper.ts"
-                );
+                if (
+                    !contextPaths.includes(
+                        "src/math.test.ts"
+                    )
+                ) {
+                    throw new Error(
+                        "Model context does not contain read-only src/math.test.ts"
+                    );
+                }
+
+
+                if (
+                    !contextPaths.includes(
+                        "src/helper.ts"
+                    )
+                ) {
+                    throw new Error(
+                        "Model context does not contain read-only src/helper.ts"
+                    );
+                }
+            } else {
+                if (
+                    inventory.length !==
+                        1 ||
+                    inventory[0] !==
+                        "src/math.ts"
+                ) {
+                    throw new Error(
+                        `Advisor repair inventory must contain only src/math.ts: ${JSON.stringify(
+                            inventory
+                        )}`
+                    );
+                }
+
+
+                if (
+                    contextPaths.length !==
+                        1 ||
+                    contextPaths[0] !==
+                        "src/math.ts"
+                ) {
+                    throw new Error(
+                        `Advisor repair repository context must contain only src/math.ts: ${JSON.stringify(
+                            contextPaths
+                        )}`
+                    );
+                }
             }
 
 
@@ -336,7 +435,7 @@ try {
 
 
             if (
-                repairMode &&
+                repairLikeMode &&
                 prompt.attempt ===
                     1 &&
                 prompt.previousVerification !==
@@ -349,7 +448,7 @@ try {
 
 
             if (
-                repairMode &&
+                repairLikeMode &&
                 prompt.attempt ===
                     2
             ) {
@@ -423,27 +522,206 @@ try {
                 }
 
 
-                if (
-                    !Array.isArray(
+                if (repairMode) {
+                    if (
+                        !Array.isArray(
+                            prompt.repairInstructions
+                        ) ||
                         prompt.repairInstructions
-                    ) ||
-                    prompt.repairInstructions
-                        .length !==
-                        0
-                ) {
-                    throw new Error(
-                        "Local repair unexpectedly received escalation repair instructions"
+                            .length !==
+                            0
+                    ) {
+                        throw new Error(
+                            "Local repair unexpectedly received escalation repair instructions"
+                        );
+                    }
+
+
+                    repairPromptObserved =
+                        true;
+
+
+                    console.log(
+                        "\nPASS local repair prompt contains previous verifier failure and failed worktree state"
                     );
                 }
 
+                if (advisorRepairMode) {
+                    const instructions =
+                        prompt.repairInstructions;
 
-                repairPromptObserved =
-                    true;
+
+                    if (
+                        !Array.isArray(
+                            instructions
+                        ) ||
+                        instructions.length ===
+                            0
+                    ) {
+                        throw new Error(
+                            "Escalation repair attempt did not receive RepairAdvisor instructions"
+                        );
+                    }
+
+
+                    if (
+                        !instructions.some(
+                            instruction =>
+                                String(
+                                    instruction
+                                ).startsWith(
+                                    "Repair diagnosis:"
+                                )
+                        )
+                    ) {
+                        throw new Error(
+                            "Escalation repair prompt does not contain structured advisor diagnosis"
+                        );
+                    }
+
+
+                    if (
+                        !instructions.some(
+                            instruction =>
+                                String(
+                                    instruction
+                                ).includes(
+                                    "Failed deterministic checks: runtime"
+                                )
+                        )
+                    ) {
+                        throw new Error(
+                            "Escalation repair prompt does not preserve deterministic failed-check identity"
+                        );
+                    }
+
+
+                    escalationRepairPromptObserved =
+                        true;
+
+
+                    console.log(
+                        "\nPASS escalation repair prompt contains AI RepairAdvisor instructions"
+                    );
+                }
+            }
+
+
+            if (
+                advisorRepairMode &&
+                prompt.attempt ===
+                    1
+            ) {
+                injectedFaults +=
+                    1;
 
 
                 console.log(
-                    "\nPASS repair prompt contains previous verifier failure and failed worktree state"
+                    "\nSeeding deterministic advisor-escalation fixture..."
                 );
+
+
+                /*
+                * Do not call the coding model for attempt 1 in advisor mode.
+                *
+                * The purpose of this mode is to deterministically exercise:
+                *
+                *   verifier RED
+                *     -> real AIRepairAdvisor
+                *     -> real coding-model repair
+                *     -> verifier PASS
+                *
+                * A correct clamp implementation is seeded first, then the
+                * unrelated existing add() behaviour is deliberately broken.
+                *
+                * This guarantees a valid TypeScript workspace with exactly one
+                * deterministic runtime regression inside the allowed write scope.
+                */
+                return {
+                    data: {
+                        summary:
+                            "Seeded correct clamp implementation with deterministic add runtime regression",
+
+                        edits: [
+                            {
+                                operation:
+                                    "insert_after",
+
+                                path:
+                                    "src/math.ts",
+
+                                content: [
+                                    "",
+                                    "",
+                                    "export function clamp(",
+                                    "    value: number,",
+                                    "    min: number,",
+                                    "    max: number",
+                                    "): number {",
+                                    "    if (value < min) {",
+                                    "        return min;",
+                                    "    }",
+                                    "",
+                                    "    if (value > max) {",
+                                    "        return max;",
+                                    "    }",
+                                    "",
+                                    "    return value;",
+                                    "}"
+                                ].join(
+                                    "\n"
+                                ),
+
+                                oldText:
+                                    "",
+
+                                newText:
+                                    "",
+
+                                anchor: [
+                                    "export function add(",
+                                    "    left: number,",
+                                    "    right: number",
+                                    "): number {",
+                                    "    return left + right;",
+                                    "}"
+                                ].join(
+                                    "\n"
+                                )
+                            },
+
+                            {
+                                operation:
+                                    "replace",
+
+                                path:
+                                    "src/math.ts",
+
+                                content:
+                                    "",
+
+                                oldText:
+                                    "    return left + right;",
+
+                                newText: [
+                                    "    /* __GAME_FACTORY_REPAIR_FAULT__ */",
+                                    '    throw new Error("__GAME_FACTORY_REPAIR_FAULT__");'
+                                ].join(
+                                    "\n"
+                                ),
+
+                                anchor:
+                                    ""
+                            }
+                        ]
+                    },
+
+                    provider:
+                        "deterministic-advisor-repair-seed",
+
+                    model:
+                        request.model
+                };
             }
 
 
@@ -664,19 +942,36 @@ try {
                 []
         },
 
-        contextScope: {
-            /*
-            * Qwen may READ related source files, but this does not
-            * grant permission to modify them.
-            */
-            allowedPaths: [
-                "src/**"
-            ],
+        contextScope:
+            advisorRepairMode
+                ? {
+                    /*
+                    * Advisor escalation E2E tests the advisor -> coding-worker
+                    * repair handoff, not cross-file repository intelligence.
+                    *
+                    * Keep this mode deliberately focused so read-only test
+                    * context cannot introduce unrelated model behaviour.
+                    */
+                    allowedPaths: [
+                        "src/math.ts"
+                    ],
 
-            forbiddenPaths: [
-                "src/secrets/**"
-            ]
-        },
+                    forbiddenPaths:
+                        []
+                }
+                : {
+                    /*
+                    * Normal and local-repair E2E continue testing richer
+                    * read-only repository context.
+                    */
+                    allowedPaths: [
+                        "src/**"
+                    ],
+
+                    forbiddenPaths: [
+                        "src/secrets/**"
+                    ]
+                },
 
         changes: [
             {
@@ -752,7 +1047,9 @@ try {
                 true,
 
             maxRepairRounds:
-                0
+                advisorRepairMode
+                    ? 1
+                    : 0
         }
     };
 
@@ -828,31 +1125,121 @@ try {
                 100_000
         });
 
+    const aiRepairAdvisor =
+        new AIRepairAdvisor({
+            provider:
+                repairProvider,
+
+            model:
+                repairModel,
+
+            temperature:
+                0.1,
+
+            maxTokens:
+                2_048
+        });
+
+
+    const repairAdvisor = {
+        async advise(
+            context
+        ) {
+            repairAdvisorCalls +=
+                1;
+
+
+            console.log(
+                "\nRepairAdvisor context:"
+            );
+
+            console.log(
+                JSON.stringify(
+                    {
+                        attemptsPerformed:
+                            context.attemptsPerformed,
+
+                        failedChecks:
+                            context.failedChecks
+                                .map(
+                                    check => ({
+                                        id:
+                                            check.id,
+
+                                        stderr:
+                                            check.stderr
+                                    })
+                                ),
+
+                        latestWorker:
+                            context.latestWorker,
+
+                        omitted:
+                            context.omitted
+                    },
+                    null,
+                    2
+                )
+            );
+
+
+            const plan =
+                await aiRepairAdvisor
+                    .advise(
+                        context
+                    );
+
+
+            lastRepairPlan =
+                plan;
+
+
+            console.log(
+                "\nAI RepairAdvisor plan:"
+            );
+
+            console.log(
+                JSON.stringify(
+                    plan,
+                    null,
+                    2
+                )
+            );
+
+
+            return plan;
+        }
+    };
+
 
     const failureAdvisor = {
         async advise(
             context
         ) {
+            failureAdvisorCalls +=
+                1;
+
+
             return {
                 type:
                     "abort",
 
-                reason:
-                    [
-                        "Live Qwen E2E verification failed.",
-                        ...context.verification
-                            .checks
-                            .filter(
-                                check =>
-                                    !check.passed
-                            )
-                            .map(
-                                check =>
-                                    `${check.id}: ${check.stderr ?? "verification failed"}`
-                            )
-                    ].join(
-                        " "
-                    )
+                reason: [
+                    "Live Qwen E2E verification failed.",
+
+                    ...context.verification
+                        .checks
+                        .filter(
+                            check =>
+                                !check.passed
+                        )
+                        .map(
+                            check =>
+                                `${check.id}: ${check.stderr ?? "verification failed"}`
+                        )
+                ].join(
+                    " "
+                )
             };
         }
     };
@@ -863,7 +1250,17 @@ try {
             planner,
             worker,
             verifier,
+
+            ...(
+                advisorRepairMode
+                    ? {
+                        repairAdvisor
+                    }
+                    : {}
+            ),
+
             failureAdvisor,
+
             runStore,
             checkpointManager
         });
@@ -894,9 +1291,24 @@ try {
         `Model: ${model}`
     );
 
+    const modeName =
+        advisorRepairMode
+            ? "AI advisor escalation repair"
+            : repairMode
+                ? "local deterministic repair"
+                : "normal";
+
+
     console.log(
-        `Mode: ${repairMode ? "deterministic repair" : "normal"}`
+        `Mode: ${modeName}`
     );
+
+
+    if (advisorRepairMode) {
+        console.log(
+            `Repair advisor model: ${repairModel}`
+        );
+    }
 
     console.log(
         `Temporary Git repository: ${repositoryRoot}`
@@ -1121,7 +1533,9 @@ try {
         console.log(
             "PASS only repaired attempt 2 was accepted"
         );
-    } else {
+    } else if (
+        !advisorRepairMode
+    ) {
         if (
             iteration.attempts
                 .length !==
@@ -1132,6 +1546,179 @@ try {
             );
         }
     }
+
+    if (advisorRepairMode) {
+        if (
+            iteration.attempts
+                .length !==
+            2
+        ) {
+            throw new Error(
+                `Advisor repair E2E expected exactly 2 attempts, got ${iteration.attempts.length}`
+            );
+        }
+
+
+        const firstAttempt =
+            iteration.attempts[0];
+
+        const secondAttempt =
+            iteration.attempts[1];
+
+
+        if (
+            firstAttempt
+                ?.verification
+                ?.passed !==
+            false
+        ) {
+            throw new Error(
+                "Advisor repair attempt 1 unexpectedly passed verification"
+            );
+        }
+
+
+        const firstRuntime =
+            firstAttempt
+                .verification
+                .checks
+                .find(
+                    check =>
+                        check.id ===
+                        "runtime"
+                );
+
+
+        if (
+            !firstRuntime ||
+            firstRuntime.passed !==
+                false
+        ) {
+            throw new Error(
+                "Advisor repair attempt 1 did not fail runtime verification"
+            );
+        }
+
+
+        if (
+            secondAttempt
+                ?.verification
+                ?.passed !==
+            true
+        ) {
+            throw new Error(
+                "Advisor escalation repair did not pass verification"
+            );
+        }
+
+
+        if (
+            injectedFaults !==
+            1
+        ) {
+            throw new Error(
+                `Expected exactly one deterministic fault, got ${injectedFaults}`
+            );
+        }
+
+
+        if (
+            repairAdvisorCalls !==
+            1
+        ) {
+            throw new Error(
+                `Expected RepairAdvisor exactly once, got ${repairAdvisorCalls}`
+            );
+        }
+
+
+        if (
+            failureAdvisorCalls !==
+            0
+        ) {
+            throw new Error(
+                `Legacy FailureAdvisor unexpectedly ran ${failureAdvisorCalls} time(s)`
+            );
+        }
+
+
+        if (
+            lastRepairPlan
+                ?.strategy !==
+            "repair"
+        ) {
+            throw new Error(
+                `RepairAdvisor did not return repair: ${lastRepairPlan?.strategy ?? "<missing>"}`
+            );
+        }
+
+
+        if (
+            !lastRepairPlan
+                .failedChecks
+                .includes(
+                    "runtime"
+                )
+        ) {
+            throw new Error(
+                "RepairAdvisor plan omitted deterministic runtime failure"
+            );
+        }
+
+
+        if (
+            !escalationRepairPromptObserved
+        ) {
+            throw new Error(
+                "Qwen escalation attempt did not observe RepairAdvisor instructions"
+            );
+        }
+
+
+        if (
+            iteration.acceptance
+                ?.attempt !==
+            2
+        ) {
+            throw new Error(
+                `Expected accepted escalation attempt 2, got ${iteration.acceptance?.attempt ?? "<missing>"}`
+            );
+        }
+
+
+        console.log(
+            "\nPASS attempt 1 produced deterministic runtime RED"
+        );
+
+        console.log(
+            "PASS AI RepairAdvisor was invoked exactly once"
+        );
+
+        console.log(
+            "PASS structured RepairPlan preserved verifier facts"
+        );
+
+        console.log(
+            "PASS legacy FailureAdvisor was bypassed"
+        );
+
+        console.log(
+            "PASS Qwen received advisor repair instructions"
+        );
+
+        console.log(
+            "PASS Qwen repaired the same isolated worktree"
+        );
+
+        console.log(
+            "PASS escalation attempt passed deterministic verification"
+        );
+
+        console.log(
+            "PASS only the verified escalation attempt was accepted"
+        );
+    }
+
 
     const acceptedAttemptNumber =
         iteration.acceptance

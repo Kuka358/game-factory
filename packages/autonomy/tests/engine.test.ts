@@ -13,6 +13,7 @@ import {
     type CodingWorker,
     type FailureAdvisor,
     type Planner,
+    type RepairAdvisor,
     type Verifier
 } from "../src/index.js";
 
@@ -222,6 +223,1060 @@ describe(
                     result.completionReason
                 ).toBe(
                     "Goal reached"
+                );
+            }
+        );
+
+        it(
+            "rejects a structured repair plan that rewrites verifier failures",
+            async () => {
+                const guardedContract = {
+                    ...contract,
+
+                    maxLocalAttempts:
+                        1
+                };
+
+
+                const planner:
+                    Planner = {
+                        async plan() {
+                            return {
+                                type:
+                                    "iteration",
+
+                                contract:
+                                    guardedContract
+                            };
+                        }
+                    };
+
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            return {
+                                summary:
+                                    "Attempt",
+
+                                changedFiles:
+                                    []
+                            };
+                        }
+                    };
+
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            return {
+                                passed:
+                                    false,
+
+                                checks: [
+                                    {
+                                        id:
+                                            "runtime",
+
+                                        command:
+                                            "node verify.mjs",
+
+                                        passed:
+                                            false,
+
+                                        exitCode:
+                                            1
+                                    }
+                                ]
+                            };
+                        }
+                    };
+
+
+                const repairAdvisor:
+                    RepairAdvisor = {
+                        async advise() {
+                            return {
+                                strategy:
+                                    "repair",
+
+                                diagnosis:
+                                    "Wrong diagnosis",
+
+                                failedChecks: [
+                                    "typecheck"
+                                ],
+
+                                instructions: [
+                                    "Fix something unrelated"
+                                ],
+
+                                filesHint:
+                                    [],
+
+                                preserve:
+                                    []
+                            };
+                        }
+                    };
+
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        repairAdvisor
+                    });
+
+
+                const result =
+                    await engine.run(
+                        createAutonomousRun({
+                            id:
+                                "structured-verifier-guard",
+
+                            goal:
+                                "Protect verifier facts",
+
+                            maxIterations:
+                                2
+                        })
+                    );
+
+
+                expect(
+                    result.status
+                ).toBe(
+                    "failed"
+                );
+
+
+                expect(
+                    result.failureReason
+                ).toContain(
+                    "must exactly match deterministic failed checks"
+                );
+            }
+        );
+
+        it(
+            "stops after the structured escalation repair budget is exhausted",
+            async () => {
+                let workerCalls =
+                    0;
+
+                let advisorCalls =
+                    0;
+
+
+                const boundedContract = {
+                    ...contract,
+
+                    maxLocalAttempts:
+                        1,
+
+                    escalation: {
+                        ...contract.escalation,
+
+                        maxRepairRounds:
+                            1
+                    }
+                };
+
+
+                const planner:
+                    Planner = {
+                        async plan() {
+                            return {
+                                type:
+                                    "iteration",
+
+                                contract:
+                                    boundedContract
+                            };
+                        }
+                    };
+
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            workerCalls +=
+                                1;
+
+
+                            return {
+                                summary:
+                                    "Still broken",
+
+                                changedFiles:
+                                    []
+                            };
+                        }
+                    };
+
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            return {
+                                passed:
+                                    false,
+
+                                checks: [
+                                    {
+                                        id:
+                                            "runtime",
+
+                                        command:
+                                            "node verify.mjs",
+
+                                        passed:
+                                            false,
+
+                                        exitCode:
+                                            1,
+
+                                        stderr:
+                                            "Runtime invariant still fails"
+                                    }
+                                ]
+                            };
+                        }
+                    };
+
+
+                const repairAdvisor:
+                    RepairAdvisor = {
+                        async advise() {
+                            advisorCalls +=
+                                1;
+
+
+                            return {
+                                strategy:
+                                    "repair",
+
+                                diagnosis:
+                                    "Runtime invariant still fails",
+
+                                failedChecks: [
+                                    "runtime"
+                                ],
+
+                                instructions: [
+                                    "Repair the runtime invariant"
+                                ],
+
+                                filesHint:
+                                    [],
+
+                                preserve:
+                                    []
+                            };
+                        }
+                    };
+
+
+                const checkpointManager =
+                    new MemoryCheckpointManager();
+
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        repairAdvisor,
+                        checkpointManager
+                    });
+
+
+                const result =
+                    await engine.run(
+                        createAutonomousRun({
+                            id:
+                                "structured-repair-budget",
+
+                            goal:
+                                "Bound repair attempts",
+
+                            maxIterations:
+                                2
+                        })
+                    );
+
+
+                expect(
+                    result.status
+                ).toBe(
+                    "blocked"
+                );
+
+
+                expect(
+                    result.failureReason
+                ).toBe(
+                    "Escalation repair budget exhausted"
+                );
+
+
+                expect(
+                    workerCalls
+                ).toBe(
+                    2
+                );
+
+
+                /*
+                * The advisor is consulted again after the failed escalation
+                * attempt because it may choose replan/abort/architecture_required
+                * instead of another repair.
+                */
+                expect(
+                    advisorCalls
+                ).toBe(
+                    2
+                );
+
+
+                expect(
+                    checkpointManager.restoredIds
+                ).toEqual(
+                    checkpointManager.createdIds
+                );
+            }
+        );
+
+        it(
+            "blocks the run when RepairAdvisor requires an architecture decision",
+            async () => {
+                const architectureContract = {
+                    ...contract,
+
+                    maxLocalAttempts:
+                        1
+                };
+
+
+                const planner:
+                    Planner = {
+                        async plan() {
+                            return {
+                                type:
+                                    "iteration",
+
+                                contract:
+                                    architectureContract
+                            };
+                        }
+                    };
+
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            return {
+                                summary:
+                                    "Attempt",
+
+                                changedFiles:
+                                    []
+                            };
+                        }
+                    };
+
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            return {
+                                passed:
+                                    false,
+
+                                checks: [
+                                    {
+                                        id:
+                                            "architecture",
+
+                                        command:
+                                            "verify architecture",
+
+                                        passed:
+                                            false,
+
+                                        exitCode:
+                                            1,
+
+                                        stderr:
+                                            "Package ownership is ambiguous"
+                                    }
+                                ]
+                            };
+                        }
+                    };
+
+
+                const repairAdvisor:
+                    RepairAdvisor = {
+                        async advise() {
+                            return {
+                                strategy:
+                                    "architecture_required",
+
+                                diagnosis:
+                                    "The verifier exposed an unresolved package ownership decision",
+
+                                failedChecks: [
+                                    "architecture"
+                                ],
+
+                                question:
+                                    "Which package should own the shared abstraction?"
+                            };
+                        }
+                    };
+
+
+                const checkpointManager =
+                    new MemoryCheckpointManager();
+
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        repairAdvisor,
+                        checkpointManager
+                    });
+
+
+                const result =
+                    await engine.run(
+                        createAutonomousRun({
+                            id:
+                                "structured-architecture",
+
+                            goal:
+                                "Escalate architecture safely",
+
+                            maxIterations:
+                                2
+                        })
+                    );
+
+
+                expect(
+                    result.status
+                ).toBe(
+                    "blocked"
+                );
+
+
+                expect(
+                    result.failureReason
+                ).toBe(
+                    "Which package should own the shared abstraction?"
+                );
+
+
+                expect(
+                    checkpointManager.restoredIds
+                ).toEqual(
+                    checkpointManager.createdIds
+                );
+            }
+        );
+
+        it(
+            "requires at least one escalation advisor",
+            () => {
+                expect(
+                    () =>
+                        new AutonomyEngine({
+                            planner: {
+                                async plan() {
+                                    return {
+                                        type:
+                                            "complete",
+
+                                        reason:
+                                            "Done"
+                                    };
+                                }
+                            },
+
+                            worker: {
+                                async execute() {
+                                    return {
+                                        summary:
+                                            "Unused",
+
+                                        changedFiles:
+                                            []
+                                    };
+                                }
+                            },
+
+                            verifier: {
+                                async verify() {
+                                    return {
+                                        passed:
+                                            true,
+
+                                        checks:
+                                            []
+                                    };
+                                }
+                            }
+                        })
+                ).toThrow(
+                    "AutonomyEngine requires either RepairAdvisor or FailureAdvisor"
+                );
+            }
+        );
+
+        it(
+            "fails the run when RepairAdvisor returns abort",
+            async () => {
+                const abortContract = {
+                    ...contract,
+
+                    maxLocalAttempts:
+                        1
+                };
+
+
+                const planner:
+                    Planner = {
+                        async plan() {
+                            return {
+                                type:
+                                    "iteration",
+
+                                contract:
+                                    abortContract
+                            };
+                        }
+                    };
+
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            return {
+                                summary:
+                                    "Attempt",
+
+                                changedFiles:
+                                    []
+                            };
+                        }
+                    };
+
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            return {
+                                passed:
+                                    false,
+
+                                checks: [
+                                    {
+                                        id:
+                                            "runtime",
+
+                                        command:
+                                            "node verify.mjs",
+
+                                        passed:
+                                            false,
+
+                                        exitCode:
+                                            1,
+
+                                        stderr:
+                                            "Behaviour changed"
+                                    }
+                                ]
+                            };
+                        }
+                    };
+
+
+                const repairAdvisor:
+                    RepairAdvisor = {
+                        async advise() {
+                            return {
+                                strategy:
+                                    "abort",
+
+                                diagnosis:
+                                    "The requested change cannot preserve runtime behaviour",
+
+                                failedChecks: [
+                                    "runtime"
+                                ],
+
+                                reason:
+                                    "Stop before accepting the regression"
+                            };
+                        }
+                    };
+
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        repairAdvisor
+                    });
+
+
+                const result =
+                    await engine.run(
+                        createAutonomousRun({
+                            id:
+                                "structured-abort",
+
+                            goal:
+                                "Abort safely",
+
+                            maxIterations:
+                                2
+                        })
+                    );
+
+
+                expect(
+                    result.status
+                ).toBe(
+                    "failed"
+                );
+
+
+                expect(
+                    result.failureReason
+                ).toBe(
+                    "Stop before accepting the regression"
+                );
+            }
+        );
+
+        it(
+            "prefers RepairAdvisor over legacy FailureAdvisor",
+            async () => {
+                let planningCalls =
+                    0;
+
+                let legacyCalls =
+                    0;
+
+
+                const repairContract = {
+                    ...contract,
+
+                    maxLocalAttempts:
+                        1
+                };
+
+
+                const planner:
+                    Planner = {
+                        async plan() {
+                            planningCalls +=
+                                1;
+
+
+                            return planningCalls ===
+                                1
+                                ? {
+                                    type:
+                                        "iteration",
+
+                                    contract:
+                                        repairContract
+                                }
+                                : {
+                                    type:
+                                        "complete",
+
+                                    reason:
+                                        "Replanned"
+                                };
+                        }
+                    };
+
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            return {
+                                summary:
+                                    "Attempt",
+
+                                changedFiles:
+                                    []
+                            };
+                        }
+                    };
+
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            return {
+                                passed:
+                                    false,
+
+                                checks: [
+                                    {
+                                        id:
+                                            "architecture",
+
+                                        command:
+                                            "verify architecture",
+
+                                        passed:
+                                            false,
+
+                                        exitCode:
+                                            1,
+
+                                        stderr:
+                                            "Architecture conflict"
+                                    }
+                                ]
+                            };
+                        }
+                    };
+
+
+                const repairAdvisor:
+                    RepairAdvisor = {
+                        async advise() {
+                            return {
+                                strategy:
+                                    "replan",
+
+                                diagnosis:
+                                    "Iteration design is insufficient",
+
+                                failedChecks: [
+                                    "architecture"
+                                ],
+
+                                reason:
+                                    "Create a different iteration"
+                            };
+                        }
+                    };
+
+
+                const failureAdvisor:
+                    FailureAdvisor = {
+                        async advise() {
+                            legacyCalls +=
+                                1;
+
+
+                            return {
+                                type:
+                                    "abort",
+
+                                reason:
+                                    "Legacy advisor must not run"
+                            };
+                        }
+                    };
+
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        repairAdvisor,
+                        failureAdvisor
+                    });
+
+
+                const result =
+                    await engine.run(
+                        createAutonomousRun({
+                            id:
+                                "advisor-precedence",
+
+                            goal:
+                                "Prefer structured advisor",
+
+                            maxIterations:
+                                3
+                        })
+                    );
+
+
+                expect(
+                    result.status
+                ).toBe(
+                    "completed"
+                );
+
+
+                expect(
+                    legacyCalls
+                ).toBe(
+                    0
+                );
+
+
+                expect(
+                    result.currentIteration
+                ).toBe(
+                    0
+                );
+            }
+        );
+
+        it(
+            "uses a structured repair advisor after local attempts are exhausted",
+            async () => {
+                let planningCalls =
+                    0;
+
+                let workerCalls =
+                    0;
+
+                let advisorCalls =
+                    0;
+
+
+                const planner:
+                    Planner = {
+                        async plan() {
+                            planningCalls +=
+                                1;
+
+
+                            return planningCalls ===
+                                1
+                                ? {
+                                    type:
+                                        "iteration",
+
+                                    contract
+                                }
+                                : {
+                                    type:
+                                        "complete",
+
+                                    reason:
+                                        "Structured repair succeeded"
+                                };
+                        }
+                    };
+
+
+                const worker:
+                    CodingWorker = {
+                        async execute(
+                            input
+                        ) {
+                            workerCalls +=
+                                1;
+
+
+                            if (
+                                input.attempt ===
+                                3
+                            ) {
+                                expect(
+                                    input.repairInstructions
+                                ).toEqual([
+                                    "Repair diagnosis: Typecheck still fails",
+
+                                    "Failed deterministic checks: typecheck",
+
+                                    "Fix the incompatible assignment",
+
+                                    "Prioritize these files while repairing: packages/example/file.ts",
+
+                                    "Preserve: Keep the public API unchanged"
+                                ]);
+                            }
+
+
+                            return {
+                                summary:
+                                    "Attempt",
+
+                                changedFiles: [
+                                    "packages/example/file.ts"
+                                ]
+                            };
+                        }
+                    };
+
+
+                const verifier:
+                    Verifier = {
+                        async verify(
+                            input
+                        ) {
+                            if (
+                                input.attempt ===
+                                3
+                            ) {
+                                return {
+                                    passed:
+                                        true,
+
+                                    checks: [
+                                        {
+                                            id:
+                                                "typecheck",
+
+                                            command:
+                                                "pnpm typecheck",
+
+                                            passed:
+                                                true,
+
+                                            exitCode:
+                                                0
+                                        }
+                                    ]
+                                };
+                            }
+
+
+                            return {
+                                passed:
+                                    false,
+
+                                checks: [
+                                    {
+                                        id:
+                                            "typecheck",
+
+                                        command:
+                                            "pnpm typecheck",
+
+                                        passed:
+                                            false,
+
+                                        exitCode:
+                                            2,
+
+                                        stderr:
+                                            "TS2322"
+                                    }
+                                ]
+                            };
+                        }
+                    };
+
+
+                const repairAdvisor:
+                    RepairAdvisor = {
+                        async advise(
+                            context
+                        ) {
+                            advisorCalls +=
+                                1;
+
+
+                            expect(
+                                context.attemptsPerformed
+                            ).toBe(
+                                2
+                            );
+
+
+                            expect(
+                                context.failedChecks
+                                    .map(
+                                        check =>
+                                            check.id
+                                    )
+                            ).toEqual([
+                                "typecheck"
+                            ]);
+
+
+                            return {
+                                strategy:
+                                    "repair",
+
+                                diagnosis:
+                                    "Typecheck still fails",
+
+                                failedChecks: [
+                                    "typecheck"
+                                ],
+
+                                instructions: [
+                                    "Fix the incompatible assignment"
+                                ],
+
+                                filesHint: [
+                                    "packages/example/file.ts"
+                                ],
+
+                                preserve: [
+                                    "Keep the public API unchanged"
+                                ]
+                            };
+                        }
+                    };
+
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        repairAdvisor
+                    });
+
+
+                const result =
+                    await engine.run(
+                        createAutonomousRun({
+                            id:
+                                "structured-repair",
+
+                            goal:
+                                "Use structured repair",
+
+                            maxIterations:
+                                3
+                        })
+                    );
+
+
+                expect(
+                    result.status
+                ).toBe(
+                    "completed"
+                );
+
+
+                expect(
+                    workerCalls
+                ).toBe(
+                    3
+                );
+
+
+                expect(
+                    advisorCalls
+                ).toBe(
+                    1
                 );
             }
         );
