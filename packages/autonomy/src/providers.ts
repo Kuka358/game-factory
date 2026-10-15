@@ -17,10 +17,20 @@ import type {
     RepairContext
 } from "./repair-context.js";
 
+import type {
+    PlanningContext
+} from "./planning-context.js";
+
 
 export interface PlanningInput {
-    run:
-        Readonly<AutonomousRun>;
+    /**
+     * Bounded immutable model-facing planning context.
+     *
+     * Planner deliberately does not receive the full mutable
+     * AutonomousRun state.
+     */
+    context:
+        PlanningContext;
 }
 
 
@@ -177,14 +187,6 @@ export interface Verifier {
             VerificationInput
     ): Promise<VerificationReport>;
 }
-
-export interface RepairAdvisor {
-    advise(
-        context:
-            RepairContext
-    ): Promise<RepairPlan>;
-}
-
 
 export interface RepairAdvisor {
     advise(

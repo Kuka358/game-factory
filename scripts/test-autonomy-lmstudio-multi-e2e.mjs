@@ -511,7 +511,7 @@ try {
             input
         ) {
             if (
-                input.run.currentIteration ===
+                input.context.progress.currentIteration ===
                 0
             ) {
                 return {
@@ -525,7 +525,7 @@ try {
 
 
             if (
-                input.run.currentIteration ===
+                input.context.progress.currentIteration ===
                 1
             ) {
                 return {

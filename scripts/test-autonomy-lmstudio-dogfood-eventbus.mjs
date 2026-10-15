@@ -607,7 +607,7 @@ try {
 
 
             if (
-                input.run.currentIteration ===
+                input.context.progress.currentIteration ===
                 0
             ) {
                 return {

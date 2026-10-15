@@ -14,6 +14,7 @@ import type {
     Planner,
     RepairAdvisor,
     Verifier,
+    PlanningDecision,
     WorkerResult
 } from "./providers.js";
 
@@ -57,9 +58,29 @@ import {
     assertRepairPlanMatchesContext
 } from "./repair-advisor.js";
 
+import {
+    DeterministicPlanningContextBuilder
+} from "./planning-context.js";
+
+import type {
+    PlanningContextBuilder,
+    PlanningContextReplanInput
+} from "./planning-context.js";
+
+import {
+    validatePlanningDecision
+} from "./planning-decision.js";
+
 export interface AutonomyEngineDependencies {
     planner:
         Planner;
+
+    /**
+     * Optional injectable deterministic projection used to construct
+     * the bounded context visible to Planner.
+     */
+    planningContextBuilder?:
+        PlanningContextBuilder;
 
     worker:
         CodingWorker;
@@ -99,6 +120,9 @@ export interface AutonomyEngineDependencies {
     eventJournal?:
         EventJournal;
 
+    maxConsecutiveReplans?:
+        number;
+
     now?:
         () => string;
 }
@@ -131,8 +155,14 @@ interface EscalationRequestInput {
 
 type IterationExecutionResult =
     | "completed"
-    | "replan"
-    | "stopped";
+    | "stopped"
+    | {
+        type:
+            "replan";
+
+        replan:
+            PlanningContextReplanInput;
+    };
 
 
 export class AutonomyEngine {
@@ -141,6 +171,12 @@ export class AutonomyEngine {
 
     private readonly repairContextBuilder?:
         RepairContextBuilder;
+
+    private readonly planningContextBuilder:
+        PlanningContextBuilder;
+
+    private readonly maxConsecutiveReplans:
+        number;
 
     constructor(
         private readonly dependencies:
@@ -151,6 +187,25 @@ export class AutonomyEngine {
             (() =>
                 new Date()
                     .toISOString());
+
+        this.planningContextBuilder =
+            dependencies.planningContextBuilder ??
+            new DeterministicPlanningContextBuilder();
+
+        const maxConsecutiveReplans =
+            dependencies.maxConsecutiveReplans ?? 3;
+
+        if (
+            !Number.isSafeInteger(maxConsecutiveReplans) ||
+            maxConsecutiveReplans <= 0
+        ) {
+            throw new Error(
+                "maxConsecutiveReplans must be a positive safe integer"
+            );
+        }
+
+        this.maxConsecutiveReplans =
+            maxConsecutiveReplans;
 
 
         if (
@@ -212,6 +267,7 @@ export class AutonomyEngine {
         );
 
         while (true) {
+
             run.status =
                 "planning";
 
@@ -219,17 +275,83 @@ export class AutonomyEngine {
                 run
             );
 
-            const decision =
-                await this.dependencies
-                    .planner
-                    .plan({
-                        run
-                    });
+
+            let decision:
+                PlanningDecision;
+
+
+            try {
+                const context =
+                    this.planningContextBuilder
+                        .build({
+                            run,
+
+                            ...(
+                                run.pendingReplan
+                                    ? {
+                                        replan:
+                                            run.pendingReplan
+                                    }
+                                    : {}
+                            )
+                        });
+
+
+                decision =
+                    validatePlanningDecision(
+                        await this.dependencies
+                            .planner
+                            .plan({
+                                context
+                            })
+                    );
+            } catch (error) {
+                const reason =
+                    getErrorMessage(
+                        error
+                    );
+
+
+                run.status =
+                    "failed";
+
+                run.failureReason =
+                    reason;
+
+
+                await this.persist(
+                    run
+                );
+
+
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "run_failed",
+
+                        timestamp:
+                            this.now(),
+
+                        details: {
+                            reason
+                        }
+                    }
+                );
+
+
+                return run;
+            }
 
             if (
                 decision.type ===
                 "complete"
             ) {
+                delete run.pendingReplan;
+
                 run.status =
                     "completed";
 
@@ -266,6 +388,8 @@ export class AutonomyEngine {
                 decision.type ===
                 "blocked"
             ) {
+                delete run.pendingReplan;
+
                 run.status =
                     "blocked";
 
@@ -362,25 +486,42 @@ export class AutonomyEngine {
                     decision.contract
                 );
 
+
             if (
-                result ===
-                "stopped"
+                result === "stopped"
             ) {
                 return run;
             }
 
+
             if (
-                result ===
-                "replan"
+                typeof result === "object" &&
+                result.type === "replan"
             ) {
+                /*
+                * Rejected iterations do not consume the successful
+                * iteration budget.
+                *
+                * run.pendingReplan was already persisted inside
+                * runIteration().
+                */
                 continue;
             }
 
-            run.currentIteration +=
-                1;
 
-            await this.persist(
-                run
+            if (result === "completed") {
+                run.currentIteration += 1;
+
+                run.consecutiveReplans = 0;
+
+                await this.persist(run);
+
+                continue;
+            }
+
+
+            throw new Error(
+                "Unexpected iteration execution result"
             );
         }
     }
@@ -597,15 +738,23 @@ export class AutonomyEngine {
 
                 completed:
                     false,
+
+                ...(
+                    run.pendingReplan
+                        ? {
+                            consumedReplan: {
+                                ...run.pendingReplan
+                            }
+                        }
+                        : {}
+                )
             };
 
-        run.iterations.push(
-            record
-        );
+        run.iterations.push(record);
 
-        await this.persist(
-            run
-        );
+        delete run.pendingReplan;
+
+        await this.persist(run);
 
         if (
             this.dependencies
@@ -1164,6 +1313,15 @@ export class AutonomyEngine {
                         );
 
                     if (
+                        record.consumedReplan &&
+                        run.pendingReplan
+                    ) {
+                        throw new Error(
+                            "Cannot safely recover run: conflicting pending replan state"
+                        );
+                    }
+
+                    if (
                         recordIndex >=
                         0
                     ) {
@@ -1172,6 +1330,71 @@ export class AutonomyEngine {
                             1
                         );
                     }
+
+                    const previousCount =
+                        run.consecutiveReplans ?? 0;
+
+                    if (
+                        !Number.isSafeInteger(previousCount) ||
+                        previousCount < 0
+                    ) {
+                        throw new Error(
+                            "Invalid persisted consecutive replan count"
+                        );
+                    }
+
+                    run.consecutiveReplans =
+                        previousCount + 1;
+
+                    if (
+                        run.consecutiveReplans >
+                        this.maxConsecutiveReplans
+                    ) {
+                        delete run.pendingReplan;
+
+                        run.status = "blocked";
+
+                        run.failureReason =
+                            `Consecutive replan budget exhausted (${this.maxConsecutiveReplans})`;
+
+                        await this.persist(run);
+
+                        await this.record(run, {
+                            runId: run.id,
+                            type: "run_blocked",
+                            timestamp: this.now(),
+
+                            details: {
+                                reason: run.failureReason
+                            }
+                        });
+
+                        return "stopped";
+                    }
+
+                    if (
+                        record.consumedReplan
+                    ) {
+                        run.pendingReplan = {
+                            ...record.consumedReplan
+                        };
+                    }
+
+                    const replan:
+                        PlanningContextReplanInput = {
+                            previousIterationId:
+                                contract.id,
+
+                            previousObjective:
+                                contract.objective,
+
+                            reason:
+                                escalation.reason
+                        };
+
+
+                    run.pendingReplan =
+                        replan;
 
                     await this.persist(
                         run
@@ -1199,7 +1422,12 @@ export class AutonomyEngine {
                         }
                     );
 
-                    return "replan";
+                    return {
+                        type:
+                            "replan",
+
+                        replan
+                    };
                 }
 
                 return "stopped";

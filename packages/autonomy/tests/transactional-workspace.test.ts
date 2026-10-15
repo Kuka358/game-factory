@@ -50,8 +50,18 @@ const contract:
             "Verification passes"
         ],
 
-        verification:
-            [],
+        verification: [
+            {
+                id:
+                    "fixture",
+
+                command:
+                    "verify:fixture",
+
+                required:
+                    true
+            }
+        ],
 
         architecturalConstraints:
             [],

@@ -313,10 +313,41 @@ export class RecoveryManager {
                     });
                 }
 
+                /*
+                * An incomplete iteration may have consumed pending replan
+                * feedback before the process crashed.
+                *
+                * When the iteration is discarded, restore that feedback
+                * so the next planner invocation receives it again.
+                */
+                if (
+                    record.consumedReplan &&
+                    run.pendingReplan
+                ) {
+                    throw new Error(
+                        "Cannot safely recover run: conflicting pending replan state"
+                    );
+                }
+
+
+                const consumedReplan =
+                    record.consumedReplan
+                        ? {
+                            ...record.consumedReplan
+                        }
+                        : undefined;
+
+
                 run.iterations.splice(
                     incompleteIndex,
                     1
                 );
+
+
+                if (consumedReplan) {
+                    run.pendingReplan =
+                        consumedReplan;
+                }
             }
         }
 

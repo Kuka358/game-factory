@@ -30,3 +30,5 @@ export * from "./repair-plan.js";
 export * from "./repair-context.js";
 export * from "./repair-advisor.js";
 export * from "./ai-repair-advisor.js";
+export * from "./planning-decision.js";
+export * from "./planning-context.js";

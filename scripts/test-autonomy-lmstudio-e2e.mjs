@@ -1059,9 +1059,7 @@ try {
             input
         ) {
             if (
-                input.run
-                    .currentIteration ===
-                0
+                input.context.progress.currentIteration === 0
             ) {
                 return {
                     type:

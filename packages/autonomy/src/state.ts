@@ -114,6 +114,24 @@ export interface IterationRecord {
 
     acceptance?:
         IterationAcceptance;
+
+    /**
+     * Replan feedback consumed when this iteration was created.
+     * Restored if the incomplete iteration is rolled back.
+     */
+    consumedReplan?:
+        PendingReplan;
+}
+
+export interface PendingReplan {
+    previousIterationId:
+        string;
+
+    previousObjective:
+        string;
+
+    reason:
+        string;
 }
 
 export interface AutonomousRun {
@@ -146,4 +164,18 @@ export interface AutonomousRun {
 
     failureReason?:
         string;
+
+    /**
+     * Replan feedback that has not yet been consumed by a
+     * durably recorded subsequent planning decision.
+     */
+    pendingReplan?:
+        PendingReplan;
+
+    /**
+     * Number of consecutive rejected iteration designs.
+     * Reset only after a successfully completed iteration.
+     */
+    consecutiveReplans?:
+        number;
 }

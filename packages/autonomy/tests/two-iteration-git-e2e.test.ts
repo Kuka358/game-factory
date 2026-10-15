@@ -79,8 +79,13 @@ const firstContract:
             "src/first.ts exists"
         ],
 
-        verification:
-            [],
+        verification: [
+            {
+                id: "fixture",
+                command: "verify:fixture",
+                required: true
+            }
+        ],
 
         architecturalConstraints:
             [],
@@ -133,8 +138,18 @@ const secondContract:
             "src/second.ts exists"
         ],
 
-        verification:
-            [],
+        verification: [
+            {
+                id:
+                    "fixture",
+
+                command:
+                    "verify:fixture",
+
+                required:
+                    true
+            }
+        ],
 
         architecturalConstraints:
             [],
@@ -190,7 +205,8 @@ describe(
                                 input
                             ) {
                                 if (
-                                    input.run
+                                    input.context
+                                        .progress
                                         .currentIteration ===
                                     0
                                 ) {
@@ -204,7 +220,8 @@ describe(
                                 }
 
                                 if (
-                                    input.run
+                                    input.context
+                                        .progress
                                         .currentIteration ===
                                     1
                                 ) {
@@ -410,8 +427,21 @@ describe(
                                     passed:
                                         true,
 
-                                    checks:
-                                        []
+                                    checks: [
+                                        {
+                                            id:
+                                                "fixture",
+
+                                            command:
+                                                "verify:fixture",
+
+                                            passed:
+                                                true,
+
+                                            exitCode:
+                                                0
+                                        }
+                                    ]
                                 };
                             }
                         };

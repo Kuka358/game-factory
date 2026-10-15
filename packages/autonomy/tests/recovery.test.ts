@@ -138,6 +138,71 @@ describe(
             }
         );
 
+        it(
+            "restores consumed replan after an incomplete iteration is discarded",
+            async () => {
+                const store =
+                    new MemoryRunStore();
+
+                const replan = {
+                    previousIterationId:
+                        "rejected-iteration",
+
+                    previousObjective:
+                        "Implement the previous design",
+
+                    reason:
+                        "The previous design failed verification"
+                };
+
+                const run =
+                    createAutonomousRun({
+                        id: "interrupted-replan-consumption",
+                        goal: "Resume planning safely",
+                        maxIterations: 3
+                    });
+
+                run.status = "implementing";
+                run.consecutiveReplans = 1;
+
+                run.iterations.push({
+                    contract,
+
+                    attempts: [],
+
+                    completed: false,
+
+                    consumedReplan: replan
+                });
+
+                await store.save(run);
+
+                const manager =
+                    new RecoveryManager({
+                        runStore: store
+                    });
+
+                const result =
+                    await manager.recover(run.id);
+
+                expect(result.type).toBe("ready");
+
+                if (result.type !== "ready") {
+                    throw new Error("Expected ready recovery");
+                }
+
+                expect(result.run.status).toBe("planning");
+                expect(result.run.iterations).toHaveLength(0);
+                expect(result.run.pendingReplan).toEqual(replan);
+                expect(result.run.consecutiveReplans).toBe(1);
+
+                const snapshot =
+                    await store.load(run.id);
+
+                expect(snapshot?.pendingReplan).toEqual(replan);
+            }
+        );
+
 
         it(
             "restores checkpoint and discards an incomplete iteration",
@@ -168,6 +233,14 @@ describe(
 
                 run.status =
                     "verifying";
+
+                const consumedReplan = {
+                    previousIterationId: "previous-rejected-iteration",
+                    previousObjective: "Implement previous design",
+                    reason: "Verification rejected the previous design"
+                };
+
+                run.consecutiveReplans = 1;
 
                 run.iterations.push(
                     {
@@ -201,7 +274,9 @@ describe(
                             false,
 
                         checkpointId:
-                            "checkpoint-123"
+                            "checkpoint-123",
+
+                        consumedReplan
                     }
                 );
 
@@ -240,6 +315,14 @@ describe(
                         "Expected ready recovery"
                     );
                 }
+
+                expect(result.run.pendingReplan).toEqual(consumedReplan);
+                expect(result.run.consecutiveReplans).toBe(1);
+
+                const persisted = await store.load(run.id);
+
+                expect(persisted?.pendingReplan).toEqual(consumedReplan);
+                expect(persisted?.consecutiveReplans).toBe(1);
 
                 expect(
                     result.run.status

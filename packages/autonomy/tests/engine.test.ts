@@ -90,14 +90,41 @@ describe(
 
                 const planner:
                     Planner = {
-                        async plan() {
+                        async plan(
+                            input
+                        ) {
                             planningCalls +=
                                 1;
+
+
+                            expect(
+                                input.context.run.goal
+                            ).toBe(
+                                "Test autonomous engine"
+                            );
+
+
+                            expect(
+                                input.context.progress
+                                    .currentIteration
+                            ).toBe(
+                                planningCalls -
+                                    1
+                            );
+
 
                             if (
                                 planningCalls ===
                                 1
                             ) {
+                                expect(
+                                    input.context
+                                        .completedIterations
+                                ).toEqual(
+                                    []
+                                );
+
+
                                 return {
                                     type:
                                         "iteration",
@@ -105,6 +132,15 @@ describe(
                                     contract
                                 };
                             }
+
+
+                            expect(
+                                input.context.progress
+                                    .completedIterationCount
+                            ).toBe(
+                                1
+                            );
+
 
                             return {
                                 type:
@@ -868,6 +904,126 @@ describe(
         );
 
         it(
+            "fails before worker execution when planner returns an invalid decision",
+            async () => {
+                let workerCalls =
+                    0;
+
+
+                const planner:
+                    Planner = {
+                        async plan() {
+                            /*
+                            * Simulate an untrusted AI-backed planner bypassing
+                            * TypeScript and returning structurally unsafe data.
+                            */
+                            return {
+                                type:
+                                    "iteration",
+
+                                contract: {
+                                    ...contract,
+
+                                    verification:
+                                        []
+                                }
+                            } as never;
+                        }
+                    };
+
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            workerCalls +=
+                                1;
+
+
+                            return {
+                                summary:
+                                    "Must not run",
+
+                                changedFiles:
+                                    []
+                            };
+                        }
+                    };
+
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            throw new Error(
+                                "Verifier must not run for an invalid planning decision"
+                            );
+                        }
+                    };
+
+
+                const failureAdvisor:
+                    FailureAdvisor = {
+                        async advise() {
+                            throw new Error(
+                                "Failure advisor must not run for an invalid planning decision"
+                            );
+                        }
+                    };
+
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        failureAdvisor
+                    });
+
+
+                const result =
+                    await engine.run(
+                        createAutonomousRun({
+                            id:
+                                "invalid-planner-output",
+
+                            goal:
+                                "Reject unsafe planner output",
+
+                            maxIterations:
+                                2
+                        })
+                    );
+
+
+                expect(
+                    result.status
+                ).toBe(
+                    "failed"
+                );
+
+
+                expect(
+                    result.failureReason
+                ).toContain(
+                    "Iteration contract verification must not be empty"
+                );
+
+
+                expect(
+                    workerCalls
+                ).toBe(
+                    0
+                );
+
+
+                expect(
+                    result.iterations
+                ).toHaveLength(
+                    0
+                );
+            }
+        );
+
+        it(
             "prefers RepairAdvisor over legacy FailureAdvisor",
             async () => {
                 let planningCalls =
@@ -887,27 +1043,61 @@ describe(
 
                 const planner:
                     Planner = {
-                        async plan() {
+                        async plan(
+                            input
+                        ) {
                             planningCalls +=
                                 1;
 
 
-                            return planningCalls ===
+                            if (
+                                planningCalls ===
                                 1
-                                ? {
+                            ) {
+                                expect(
+                                    input.context.replan
+                                ).toBeUndefined();
+
+
+                                return {
                                     type:
                                         "iteration",
 
                                     contract:
                                         repairContract
-                                }
-                                : {
-                                    type:
-                                        "complete",
-
-                                    reason:
-                                        "Replanned"
                                 };
+                            }
+
+
+                            expect(
+                                input.context.replan
+                            ).toEqual({
+                                previousIterationId:
+                                    repairContract.id,
+
+                                previousObjective:
+                                    repairContract.objective,
+
+                                reason:
+                                    "Create a different iteration"
+                            });
+
+
+                            expect(
+                                input.context.progress
+                                    .currentIteration
+                            ).toBe(
+                                0
+                            );
+
+
+                            return {
+                                type:
+                                    "complete",
+
+                                reason:
+                                    "Replanned"
+                            };
                         }
                     };
 
@@ -1019,7 +1209,6 @@ describe(
                         })
                     );
 
-
                 expect(
                     result.status
                 ).toBe(
@@ -1039,6 +1228,592 @@ describe(
                 ).toBe(
                     0
                 );
+            }
+        );
+
+        it(
+            "restores pending replan feedback after process restart",
+            async () => {
+                const store =
+                    new MemoryRunStore();
+
+                const pendingReplan = {
+                    previousIterationId:
+                        "rejected-iteration",
+
+                    previousObjective:
+                        "Implement the rejected design",
+
+                    reason:
+                        "Deterministic verification rejected the design"
+                };
+
+
+                const run =
+                    createAutonomousRun({
+                        id: "replan-restart",
+                        goal: "Continue after an interrupted replan",
+                        maxIterations: 3
+                    });
+
+
+                run.pendingReplan =
+                    pendingReplan;
+
+
+                await store.save(run);
+
+
+                let plannerCalls =
+                    0;
+
+
+                const planner:
+                    Planner = {
+                        async plan(input) {
+                            plannerCalls += 1;
+
+                            expect(
+                                input.context.replan
+                            ).toEqual(
+                                pendingReplan
+                            );
+
+                            expect(
+                                input.context.progress
+                                    .currentIteration
+                            ).toBe(0);
+
+                            return {
+                                type: "complete",
+                                reason: "Recovered replan"
+                            };
+                        }
+                    };
+
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            throw new Error(
+                                "Worker must not run"
+                            );
+                        }
+                    };
+
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            throw new Error(
+                                "Verifier must not run"
+                            );
+                        }
+                    };
+
+
+                const failureAdvisor:
+                    FailureAdvisor = {
+                        async advise() {
+                            throw new Error(
+                                "FailureAdvisor must not run"
+                            );
+                        }
+                    };
+
+
+                /*
+                * New engine instance, shared durable run store.
+                */
+                const restartedEngine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        failureAdvisor,
+                        runStore: store
+                    });
+
+
+                const result =
+                    await restartedEngine.resume(
+                        run.id
+                    );
+
+
+                expect(result).not.toBeNull();
+                expect(result?.status).toBe("completed");
+                expect(result?.completionReason).toBe(
+                    "Recovered replan"
+                );
+                expect(result?.pendingReplan).toBeUndefined();
+                expect(plannerCalls).toBe(1);
+
+                const finalSnapshot =
+                    await store.load(run.id);
+
+                expect(
+                    finalSnapshot?.pendingReplan
+                ).toBeUndefined();
+            }
+        );
+
+        it(
+            "persists replan feedback before the next planner call",
+            async () => {
+                const store =
+                    new MemoryRunStore();
+
+                let planningCalls =
+                    0;
+
+                const expectedReplan = {
+                    previousIterationId:
+                        contract.id,
+
+                    previousObjective:
+                        contract.objective,
+
+                    reason:
+                        "Use a different implementation approach"
+                };
+
+
+                const planner:
+                    Planner = {
+                        async plan(input) {
+                            planningCalls += 1;
+
+                            if (planningCalls === 1) {
+                                return {
+                                    type: "iteration",
+
+                                    contract: {
+                                        ...contract,
+
+                                        maxLocalAttempts: 1
+                                    }
+                                };
+                            }
+
+                            const snapshot =
+                                await store.load(
+                                    input.context.run.id
+                                );
+
+                            expect(
+                                snapshot?.pendingReplan
+                            ).toEqual(
+                                expectedReplan
+                            );
+
+                            expect(
+                                input.context.replan
+                            ).toEqual(
+                                expectedReplan
+                            );
+
+                            return {
+                                type: "complete",
+                                reason: "Replan received"
+                            };
+                        }
+                    };
+
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            return {
+                                summary: "Attempt failed",
+                                changedFiles: []
+                            };
+                        }
+                    };
+
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            return {
+                                passed: false,
+
+                                checks: [
+                                    {
+                                        id: "typecheck",
+                                        command: "pnpm typecheck",
+                                        passed: false,
+                                        exitCode: 1
+                                    }
+                                ]
+                            };
+                        }
+                    };
+
+
+                const repairAdvisor:
+                    RepairAdvisor = {
+                        async advise() {
+                            return {
+                                strategy: "replan",
+
+                                diagnosis:
+                                    "The current design cannot pass verification",
+
+                                failedChecks: [
+                                    "typecheck"
+                                ],
+
+                                reason:
+                                    expectedReplan.reason
+                            };
+                        }
+                    };
+
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        repairAdvisor,
+                        runStore: store
+                    });
+
+
+                const result =
+                    await engine.run(
+                        createAutonomousRun({
+                            id: "durable-replan",
+                            goal: "Test replan persistence",
+                            maxIterations: 2
+                        })
+                    );
+
+
+                expect(result.status).toBe("completed");
+                expect(result.currentIteration).toBe(0);
+                expect(planningCalls).toBe(2);
+                expect(result.iterations).toHaveLength(0);
+                expect(result.pendingReplan).toBeUndefined();
+
+                const finalSnapshot =
+                    await store.load(result.id);
+
+                expect(finalSnapshot?.currentIteration).toBe(0);
+
+                expect(
+                    finalSnapshot?.pendingReplan
+                ).toBeUndefined();
+            }
+        );
+
+        it(
+            "resets consecutive replan budget after a successful iteration",
+            async () => {
+                let planningCalls = 0;
+
+                const ids = [
+                    "failed-a",
+                    "accepted-a",
+                    "failed-b",
+                    "accepted-b"
+                ];
+
+                const planner: Planner = {
+                    async plan(input) {
+                        const id = ids[planningCalls];
+                        planningCalls += 1;
+
+                        if (!id) {
+                            return {
+                                type: "complete",
+                                reason: "All accepted iterations completed"
+                            };
+                        }
+
+                        if (id === "failed-b") {
+                            expect(
+                                input.context.replan
+                            ).toBeUndefined();
+
+                            expect(
+                                input.context.progress.currentIteration
+                            ).toBe(1);
+                        }
+
+                        return {
+                            type: "iteration",
+                            contract: {
+                                ...contract,
+                                id,
+                                maxLocalAttempts: 1
+                            }
+                        };
+                    }
+                };
+
+                const worker: CodingWorker = {
+                    async execute() {
+                        return {
+                            summary: "Fixture attempt",
+                            changedFiles: []
+                        };
+                    }
+                };
+
+                const verifier: Verifier = {
+                    async verify(input) {
+                        const passed =
+                            input.contract.id.startsWith("accepted-");
+
+                        return {
+                            passed,
+                            checks: [{
+                                id: "typecheck",
+                                command: "pnpm typecheck",
+                                passed,
+                                exitCode: passed ? 0 : 1
+                            }]
+                        };
+                    }
+                };
+
+                const failureAdvisor: FailureAdvisor = {
+                    async advise() {
+                        return {
+                            type: "replan",
+                            reason: "Try another design"
+                        };
+                    }
+                };
+
+                const engine = new AutonomyEngine({
+                    planner,
+                    worker,
+                    verifier,
+                    failureAdvisor,
+                    maxConsecutiveReplans: 1
+                });
+
+                const result = await engine.run(
+                    createAutonomousRun({
+                        id: "replan-budget-reset",
+                        goal: "Verify the replan budget resets",
+                        maxIterations: 2
+                    })
+                );
+
+                expect(result.status).toBe("completed");
+                expect(result.currentIteration).toBe(2);
+                expect(result.iterations).toHaveLength(2);
+                expect(result.consecutiveReplans).toBe(0);
+                expect(result.pendingReplan).toBeUndefined();
+                expect(planningCalls).toBe(5);
+            }
+        );
+
+        it(
+            "resets consecutive replan budget after a successful iteration",
+            async () => {
+                let planningCalls = 0;
+
+                const objectives = [
+                    "failed-a",
+                    "accepted-a",
+                    "failed-b",
+                    "accepted-b"
+                ];
+
+                const planner: Planner = {
+                    async plan(input) {
+                        planningCalls += 1;
+
+                        if (planningCalls === 3) {
+                            expect(
+                                input.context.replan
+                            ).toBeUndefined();
+                        }
+
+                        const id =
+                            objectives[planningCalls - 1];
+
+                        if (!id) {
+                            return {
+                                type: "complete",
+                                reason: "Both accepted iterations completed"
+                            };
+                        }
+
+                        return {
+                            type: "iteration",
+                            contract: {
+                                ...contract,
+                                id,
+                                maxLocalAttempts: 1
+                            }
+                        };
+                    }
+                };
+
+                const worker: CodingWorker = {
+                    async execute() {
+                        return {
+                            summary: "Attempt",
+                            changedFiles: []
+                        };
+                    }
+                };
+
+                const verifier: Verifier = {
+                    async verify(input) {
+                        const passed =
+                            input.contract.id.startsWith(
+                                "accepted-"
+                            );
+
+                        return {
+                            passed,
+                            checks: [
+                                {
+                                    id: "typecheck",
+                                    command: "pnpm typecheck",
+                                    passed,
+                                    exitCode: passed ? 0 : 1
+                                }
+                            ]
+                        };
+                    }
+                };
+
+                const failureAdvisor: FailureAdvisor = {
+                    async advise() {
+                        return {
+                            type: "replan",
+                            reason: "Try another design"
+                        };
+                    }
+                };
+
+                const engine = new AutonomyEngine({
+                    planner,
+                    worker,
+                    verifier,
+                    failureAdvisor,
+                    maxConsecutiveReplans: 1
+                });
+
+                const result = await engine.run(
+                    createAutonomousRun({
+                        id: "replan-reset",
+                        goal: "Verify replan budget reset",
+                        maxIterations: 2
+                    })
+                );
+
+                expect(result.status).toBe("completed");
+                expect(result.currentIteration).toBe(2);
+                expect(result.iterations).toHaveLength(2);
+                expect(result.consecutiveReplans).toBe(0);
+                expect(result.pendingReplan).toBeUndefined();
+                expect(planningCalls).toBe(5);
+            }
+        );
+
+        it(
+            "blocks infinite consecutive replanning",
+            async () => {
+                let planningCalls = 0;
+                let workerCalls = 0;
+
+                const planner:
+                    Planner = {
+                        async plan() {
+                            planningCalls += 1;
+
+                            return {
+                                type: "iteration",
+
+                                contract: {
+                                    ...contract,
+                                    id: `replan-${planningCalls}`,
+                                    maxLocalAttempts: 1
+                                }
+                            };
+                        }
+                    };
+
+                const worker:
+                    CodingWorker = {
+                        async execute() {
+                            workerCalls += 1;
+
+                            return {
+                                summary: "Failed attempt",
+                                changedFiles: []
+                            };
+                        }
+                    };
+
+                const verifier:
+                    Verifier = {
+                        async verify() {
+                            return {
+                                passed: false,
+
+                                checks: [
+                                    {
+                                        id: "typecheck",
+                                        command: "pnpm typecheck",
+                                        passed: false,
+                                        exitCode: 1
+                                    }
+                                ]
+                            };
+                        }
+                    };
+
+                const failureAdvisor:
+                    FailureAdvisor = {
+                        async advise() {
+                            return {
+                                type: "replan",
+                                reason: "Try another design"
+                            };
+                        }
+                    };
+
+                const engine =
+                    new AutonomyEngine({
+                        planner,
+                        worker,
+                        verifier,
+                        failureAdvisor,
+
+                        maxConsecutiveReplans: 2
+                    });
+
+                const result =
+                    await engine.run(
+                        createAutonomousRun({
+                            id: "bounded-replanning",
+                            goal: "Prevent infinite replan loops",
+                            maxIterations: 3
+                        })
+                    );
+
+                expect(result.status).toBe("blocked");
+                expect(result.failureReason).toContain(
+                    "Consecutive replan budget exhausted"
+                );
+
+                expect(planningCalls).toBe(3);
+                expect(workerCalls).toBe(3);
+
+                expect(result.currentIteration).toBe(0);
+                expect(result.iterations).toHaveLength(0);
+                expect(result.consecutiveReplans).toBe(3);
+                expect(result.pendingReplan).toBeUndefined();
             }
         );
 

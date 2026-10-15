@@ -50,8 +50,18 @@ const contract:
             "Verification passes"
         ],
 
-        verification:
-            [],
+        verification: [
+            {
+                id:
+                    "fixture",
+
+                command:
+                    "verify:fixture",
+
+                required:
+                    true
+            }
+        ],
 
         architecturalConstraints:
             [],
@@ -180,8 +190,21 @@ describe(
                                 passed:
                                     true,
 
-                                checks:
-                                    []
+                                checks: [
+                                    {
+                                        id:
+                                            "fixture",
+
+                                        command:
+                                            "verify:fixture",
+
+                                        passed:
+                                            true,
+
+                                        exitCode:
+                                            0
+                                    }
+                                ]
                             };
                         }
                     };
@@ -370,8 +393,21 @@ describe(
                                 passed:
                                     true,
 
-                                checks:
-                                    []
+                                checks: [
+                                    {
+                                        id:
+                                            "fixture",
+
+                                        command:
+                                            "verify:fixture",
+
+                                        passed:
+                                            true,
+
+                                        exitCode:
+                                            0
+                                    }
+                                ]
                             };
                         }
                     };
