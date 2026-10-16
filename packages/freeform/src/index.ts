@@ -62,3 +62,28 @@ export {
 export type {
     TaskGraphAutonomyPlannerOptions
 } from "./autonomy/TaskGraphAutonomyPlanner.js";
+
+export {
+    FreeformWorkspaceBootstrapper
+} from "./workspace/FreeformWorkspaceBootstrapper.js";
+
+export type {
+    FreeformWorkspaceBootstrapperOptions,
+    FreeformWorkspaceResult
+} from "./workspace/FreeformWorkspaceBootstrapper.js";
+
+export {
+    FreeformDependencyProvisioner
+} from "./workspace/FreeformDependencyProvisioner.js";
+
+export type {
+    FreeformDependencyProvisionerOptions
+} from "./workspace/FreeformDependencyProvisioner.js";
+
+export {
+    FreeformGameInitializer
+} from "./workspace/FreeformGameInitializer.js";
+
+export type {
+    FreeformGameInitializerOptions
+} from "./workspace/FreeformGameInitializer.js";
