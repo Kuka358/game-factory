@@ -14,12 +14,37 @@ import type {
     PipelineProgress
 } from "@game-factory/orchestrator";
 
+export type GameJobPipeline = (
+    prompt: string,
+    outputRoot: string,
+    options: Parameters<
+        typeof runPromptGenerationPipeline
+    >[2]
+) => Promise<{
+    success: boolean;
+    qa: {
+        result: string;
+    };
+    generation: {
+        spec: {
+            metadata: {
+                title: string;
+            };
+        };
+        workspace: {
+            root: string;
+        };
+    };
+}>;
+
 export interface GameJobRunnerOptions {
     store:
         GameJobStore;
 
     outputRoot:
         string;
+
+    pipeline?: GameJobPipeline;
 }
 
 export class GameJobRunner {
@@ -74,7 +99,10 @@ export class GameJobRunner {
                 );
 
             const result =
-                await runPromptGenerationPipeline(
+                await (
+                    this.options.pipeline ??
+                    runPromptGenerationPipeline
+                )(
                     job.prompt,
 
                     resolve(
@@ -97,6 +125,16 @@ export class GameJobRunner {
                             }
                     }
                 );
+
+            if (!result.success) {
+                this.options.store.update(jobId, {
+                    status: "failed",
+                    statusMessage: "Game QA failed",
+                    error: `QA result: ${result.qa.result}`
+                });
+
+                return;
+            }
 
             const spec =
                 result.generation
@@ -129,7 +167,9 @@ export class GameJobRunner {
                             ),
 
                         workspacePath:
-                            workspace.root
+                            workspace.root,
+
+                        statusMessage: "Game generation completed"
                     }
                 );
         } catch (
@@ -165,6 +205,10 @@ export class GameJobRunner {
         progress:
             PipelineProgress
     ): void {
+        if (progress.stage === "completed") {
+            return;
+        }
+
         this.options
             .store
             .update(

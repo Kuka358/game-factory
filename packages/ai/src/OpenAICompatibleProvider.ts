@@ -5,6 +5,10 @@ import {
     type AIResponse
 } from "./index.js";
 
+import {
+    Agent
+} from "undici";
+
 export interface OpenAICompatibleProviderOptions {
     id?:
         string;
@@ -38,6 +42,9 @@ interface ChatCompletionResponseDto {
                 content:
                     string;
             };
+
+            finishReason?:
+                string | null;
         }>;
 
     usage?: {
@@ -70,6 +77,9 @@ export class OpenAICompatibleProvider
     private readonly timeoutMs:
         number;
 
+    private readonly dispatcher:
+        Agent;
+
     private readonly customHeaders:
         Record<string, string>;
 
@@ -100,6 +110,15 @@ export class OpenAICompatibleProvider
             options.timeoutMs ??
             60_000;
 
+        this.dispatcher =
+            new Agent({
+                headersTimeout:
+                    this.timeoutMs,
+
+                bodyTimeout:
+                    this.timeoutMs
+            });
+
         this.customHeaders =
             options.headers ??
             {};
@@ -124,27 +143,36 @@ export class OpenAICompatibleProvider
             );
 
         try {
+            const requestInit = {
+                method:
+                    "POST",
+
+                headers:
+                    this.createHeaders(),
+
+                body:
+                    JSON.stringify(
+                        createRequestBody(
+                            request,
+                            this.bodyExtras
+                        )
+                    ),
+
+                dispatcher:
+                    this.dispatcher,
+
+                signal:
+                    controller.signal
+            } as RequestInit & {
+                dispatcher:
+                    Agent;
+            };
+
+
             const response =
                 await fetch(
                     this.createUrl(),
-                    {
-                        method:
-                            "POST",
-
-                        headers:
-                            this.createHeaders(),
-
-                        body:
-                            JSON.stringify(
-                                createRequestBody(
-                                    request,
-                                    this.bodyExtras
-                                )
-                            ),
-
-                        signal:
-                            controller.signal
-                    }
+                    requestInit
                 );
 
             if (!response.ok) {
@@ -182,7 +210,9 @@ export class OpenAICompatibleProvider
                 parseContent<T>(
                     content,
                     request,
-                    this.id
+                    this.id,
+                    parsed.choices[0]!
+                        .finishReason
                 );
 
             return {
@@ -245,9 +275,9 @@ export class OpenAICompatibleProvider
             throw new AIError(
                 "request_failed",
 
-                error instanceof Error
-                    ? error.message
-                    : "AI request failed",
+                describeRequestError(
+                    error
+                ),
 
                 this.id,
 
@@ -380,7 +410,10 @@ function parseContent<T>(
         AIRequest,
 
     provider:
-        string
+        string,
+
+    finishReason?:
+        string | null
 ): T {
     if (
         !request.structuredOutput
@@ -393,10 +426,41 @@ function parseContent<T>(
             content
         ) as T;
     } catch (error) {
+        const trimmed =
+            content.trim();
+
+        const maximumPreviewLength =
+            1500;
+
+        const preview =
+            trimmed.length ===
+            0
+                ? "<empty>"
+                : trimmed.length >
+                  maximumPreviewLength
+                    ? `${trimmed.slice(
+                          0,
+                          maximumPreviewLength
+                      )}...`
+                    : trimmed;
+
+        const finishReasonText =
+            finishReason
+                ? ` finish_reason=${finishReason}.`
+                : "";
+
         throw new AIError(
             "structured_output_failed",
 
-            "AI provider returned invalid JSON for structured output",
+            [
+                "AI provider returned invalid JSON for structured output.",
+                finishReasonText,
+                `Raw content preview: ${JSON.stringify(
+                    preview
+                )}`
+            ].join(
+                ""
+            ),
 
             provider,
 
@@ -465,6 +529,18 @@ function parseResponse(
             value.usage
         );
 
+    const finishReason =
+        typeof firstChoice
+            .finish_reason ===
+            "string"
+            ? firstChoice
+                .finish_reason
+            : firstChoice
+                .finish_reason ===
+            null
+                ? null
+                : undefined;
+
     return {
         model,
 
@@ -475,7 +551,9 @@ function parseResponse(
                         firstChoice
                             .message
                             .content
-                }
+                },
+
+                finishReason
             }
         ],
 
@@ -612,4 +690,44 @@ function ensureTrailingSlash(
     )
         ? value
         : `${value}/`;
+}
+
+function describeRequestError(
+    error:
+        unknown
+): string {
+    if (
+        !(error instanceof Error)
+    ) {
+        return "AI request failed";
+    }
+
+
+    const cause =
+        (
+            error as Error & {
+                cause?:
+                    unknown;
+            }
+        ).cause;
+
+
+    if (
+        cause instanceof Error
+    ) {
+        const code =
+            "code" in cause &&
+            typeof cause.code ===
+                "string"
+                ? ` [${cause.code}]`
+                : "";
+
+
+        return (
+            `${error.message}: ${cause.name}${code}: ${cause.message}`
+        );
+    }
+
+
+    return error.message;
 }

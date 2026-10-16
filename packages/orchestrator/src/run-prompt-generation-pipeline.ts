@@ -146,10 +146,7 @@ export async function runPromptGenerationPipeline(
         options.target ??
         "web";
 
-    if (
-        target ===
-        "yandex"
-    ) {
+    if (target === "yandex" && result.success) {
         options.onProgress?.({
             stage:
                 "platform_export",
@@ -224,13 +221,12 @@ export async function runPromptGenerationPipeline(
         "utf8"
     );
 
-    options.onProgress?.({
-        stage:
-            "completed",
-
-        message:
-            "Game generation completed"
-    });
+    if (result.success) {
+        options.onProgress?.({
+            stage: "completed",
+            message: "Game generation completed"
+        });
+    }
 
     return result;
 }

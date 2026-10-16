@@ -1,0 +1,2180 @@
+import {
+    randomUUID
+} from "node:crypto";
+
+import type {
+    IterationContract
+} from "./contracts.js";
+
+import type {
+    CheckpointManager,
+    CodingWorker,
+    FailureAdvisor,
+    FailureDecision,
+    Planner,
+    RepairAdvisor,
+    Verifier,
+    PlanningDecision,
+    WorkerResult
+} from "./providers.js";
+
+import type {
+    AutonomousRun,
+    IterationAttempt,
+    IterationRecord,
+    VerificationReport
+} from "./state.js";
+
+import type {
+    AutonomyEvent,
+    EventJournal
+} from "./events.js";
+
+import type {
+    RunStore
+} from "./persistence.js";
+
+import {
+    RecoveryManager
+} from "./recovery.js";
+
+import {
+    isRetryableCodingHarnessError
+} from "./harness.js";
+
+import {
+    DeterministicRepairContextBuilder
+} from "./repair-context.js";
+
+import type {
+    RepairContextBuilder
+} from "./repair-context.js";
+
+import type {
+    RepairExecutionPlan
+} from "./repair-plan.js";
+
+import {
+    assertRepairPlanMatchesContext
+} from "./repair-advisor.js";
+
+import {
+    DeterministicPlanningContextBuilder
+} from "./planning-context.js";
+
+import type {
+    PlanningContextBuilder,
+    PlanningContextReplanInput
+} from "./planning-context.js";
+
+import {
+    validatePlanningDecision
+} from "./planning-decision.js";
+
+export interface AutonomyEngineDependencies {
+    planner:
+        Planner;
+
+    /**
+     * Optional injectable deterministic projection used to construct
+     * the bounded context visible to Planner.
+     */
+    planningContextBuilder?:
+        PlanningContextBuilder;
+
+    worker:
+        CodingWorker;
+
+    verifier:
+        Verifier;
+
+    /**
+     * Structured escalation path.
+     *
+     * When present, the engine prefers RepairAdvisor over the
+     * legacy FailureAdvisor.
+     */
+    repairAdvisor?:
+        RepairAdvisor;
+
+    /**
+     * Optional injectable builder primarily useful for testing
+     * and alternative bounded-context policies.
+     */
+    repairContextBuilder?:
+        RepairContextBuilder;
+
+    /**
+     * Legacy escalation provider kept during the migration to
+     * structured RepairPlan.
+     */
+    failureAdvisor?:
+        FailureAdvisor;
+
+    runStore?:
+        RunStore;
+
+    checkpointManager?:
+        CheckpointManager;
+
+    eventJournal?:
+        EventJournal;
+
+    maxConsecutiveReplans?:
+        number;
+
+    now?:
+        () => string;
+}
+
+export interface RunExecutionOptions {
+    resumed?:
+        boolean;
+}
+
+interface EscalationRequestInput {
+    run:
+        AutonomousRun;
+
+    contract:
+        IterationContract;
+
+    record:
+        IterationRecord;
+
+    attempts:
+        number;
+
+    verification:
+        VerificationReport;
+
+    workerResult:
+        WorkerResult;
+}
+
+
+type IterationExecutionResult =
+    | "completed"
+    | "stopped"
+    | {
+        type:
+            "replan";
+
+        replan:
+            PlanningContextReplanInput;
+    };
+
+
+export class AutonomyEngine {
+    private readonly now:
+        () => string;
+
+    private readonly repairContextBuilder?:
+        RepairContextBuilder;
+
+    private readonly planningContextBuilder:
+        PlanningContextBuilder;
+
+    private readonly maxConsecutiveReplans:
+        number;
+
+    constructor(
+        private readonly dependencies:
+            AutonomyEngineDependencies
+    ) {
+        this.now =
+            dependencies.now ??
+            (() =>
+                new Date()
+                    .toISOString());
+
+        this.planningContextBuilder =
+            dependencies.planningContextBuilder ??
+            new DeterministicPlanningContextBuilder();
+
+        const maxConsecutiveReplans =
+            dependencies.maxConsecutiveReplans ?? 3;
+
+        if (
+            !Number.isSafeInteger(maxConsecutiveReplans) ||
+            maxConsecutiveReplans <= 0
+        ) {
+            throw new Error(
+                "maxConsecutiveReplans must be a positive safe integer"
+            );
+        }
+
+        this.maxConsecutiveReplans =
+            maxConsecutiveReplans;
+
+
+        if (
+            !dependencies.repairAdvisor &&
+            !dependencies.failureAdvisor
+        ) {
+            throw new Error(
+                "AutonomyEngine requires either RepairAdvisor or FailureAdvisor"
+            );
+        }
+
+
+        if (
+            dependencies.repairContextBuilder &&
+            !dependencies.repairAdvisor
+        ) {
+            throw new Error(
+                "AutonomyEngine repairContextBuilder requires RepairAdvisor"
+            );
+        }
+
+
+        if (
+            dependencies.repairAdvisor
+        ) {
+            this.repairContextBuilder =
+                dependencies.repairContextBuilder ??
+                new DeterministicRepairContextBuilder();
+        }
+    }
+
+
+    async run(
+        run:
+            AutonomousRun,
+
+        options:
+            RunExecutionOptions = {}
+    ): Promise<AutonomousRun> {
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    options.resumed
+                        ? "run_resumed"
+                        : "run_started",
+
+                timestamp:
+                    this.now(),
+
+                details: {
+                    goal:
+                        run.goal
+                }
+            }
+        );
+
+        while (true) {
+
+            run.status =
+                "planning";
+
+            await this.persist(
+                run
+            );
+
+
+            let decision:
+                PlanningDecision;
+
+
+            try {
+                const context =
+                    this.planningContextBuilder
+                        .build({
+                            run,
+
+                            ...(
+                                run.pendingReplan
+                                    ? {
+                                        replan:
+                                            run.pendingReplan
+                                    }
+                                    : {}
+                            )
+                        });
+
+
+                decision =
+                    validatePlanningDecision(
+                        await this.dependencies
+                            .planner
+                            .plan({
+                                context
+                            })
+                    );
+            } catch (error) {
+                const reason =
+                    getErrorMessage(
+                        error
+                    );
+
+
+                run.status =
+                    "failed";
+
+                run.failureReason =
+                    reason;
+
+
+                await this.persist(
+                    run
+                );
+
+
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "run_failed",
+
+                        timestamp:
+                            this.now(),
+
+                        details: {
+                            reason
+                        }
+                    }
+                );
+
+
+                return run;
+            }
+
+            if (
+                decision.type ===
+                "complete"
+            ) {
+                delete run.pendingReplan;
+
+                run.status =
+                    "completed";
+
+                run.completionReason =
+                    decision.reason;
+
+                await this.persist(
+                    run
+                );
+
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "run_completed",
+
+                        timestamp:
+                            this.now(),
+
+                        details: {
+                            reason:
+                                decision.reason
+                        }
+                    }
+                );
+
+                return run;
+            }
+
+            if (
+                decision.type ===
+                "blocked"
+            ) {
+                delete run.pendingReplan;
+
+                run.status =
+                    "blocked";
+
+                run.failureReason =
+                    decision.reason;
+
+                await this.persist(
+                    run
+                );
+
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "run_blocked",
+
+                        timestamp:
+                            this.now(),
+
+                        details: {
+                            reason:
+                                run.failureReason
+                        }
+                    }
+                );
+
+                return run;
+            }
+
+            if (
+                run.currentIteration >=
+                run.maxIterations
+            ) {
+                run.status =
+                    "blocked";
+
+                run.failureReason =
+                    "Maximum autonomous iteration count reached";
+
+                await this.persist(
+                    run
+                );
+
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "run_blocked",
+
+                        timestamp:
+                            this.now(),
+
+                        details: {
+                            reason:
+                                run.failureReason
+                        }
+                    }
+                );
+
+                return run;
+            }
+
+            await this.record(
+                run,
+                {
+                    runId:
+                        run.id,
+
+                    type:
+                        "iteration_planned",
+
+                    timestamp:
+                        this.now(),
+
+                    iterationId:
+                        decision.contract.id,
+
+                    details: {
+                        objective:
+                            decision.contract.objective
+                    }
+                }
+            );
+
+            const result =
+                await this.runIteration(
+                    run,
+                    decision.contract
+                );
+
+
+            if (
+                result === "stopped"
+            ) {
+                return run;
+            }
+
+
+            if (
+                typeof result === "object" &&
+                result.type === "replan"
+            ) {
+                /*
+                * Rejected iterations do not consume the successful
+                * iteration budget.
+                *
+                * run.pendingReplan was already persisted inside
+                * runIteration().
+                */
+                continue;
+            }
+
+
+            if (result === "completed") {
+                run.currentIteration += 1;
+
+                run.consecutiveReplans = 0;
+
+                await this.persist(run);
+
+                continue;
+            }
+
+
+            throw new Error(
+                "Unexpected iteration execution result"
+            );
+        }
+    }
+
+    async resume(
+        runId:
+            string
+    ): Promise<AutonomousRun | null> {
+        const runStore =
+            this.dependencies
+                .runStore;
+
+        if (!runStore) {
+            throw new Error(
+                "AutonomyEngine resume requires a RunStore"
+            );
+        }
+
+        const recoveryManager =
+            new RecoveryManager({
+                runStore,
+
+                checkpointManager:
+                    this.dependencies
+                        .checkpointManager,
+
+                eventJournal:
+                    this.dependencies
+                        .eventJournal,
+
+                worker:
+                    this.dependencies
+                        .worker,
+
+                now:
+                    this.now
+            });
+
+        const recovery =
+            await recoveryManager
+                .recover(
+                    runId
+                );
+
+        if (
+            recovery.type ===
+            "not_found"
+        ) {
+            return null;
+        }
+
+        if (
+            recovery.type ===
+            "terminal"
+        ) {
+            return recovery.run;
+        }
+
+        return this.run(
+            recovery.run,
+            {
+                resumed:
+                    true
+            }
+        );
+    }
+
+    private async requestEscalation(
+        input:
+            EscalationRequestInput
+    ): Promise<FailureDecision> {
+        const repairAdvisor =
+            this.dependencies
+                .repairAdvisor;
+
+
+        if (repairAdvisor) {
+            const builder =
+                this.repairContextBuilder;
+
+
+            if (!builder) {
+                throw new Error(
+                    "RepairAdvisor requires a RepairContextBuilder"
+                );
+            }
+
+
+            const context =
+                builder.build({
+                    run:
+                        input.run,
+
+                    contract:
+                        input.contract,
+
+                    attempts:
+                        input.attempts,
+
+                    attemptHistory:
+                        input.record.attempts,
+
+                    verification:
+                        input.verification,
+
+                    workerResult:
+                        input.workerResult
+                });
+
+
+            const plan =
+                await repairAdvisor
+                    .advise(
+                        context
+                    );
+
+            assertRepairPlanMatchesContext(
+                plan,
+                context
+            );
+
+
+            switch (
+                plan.strategy
+            ) {
+                case "repair":
+                    return {
+                        type:
+                            "repair",
+
+                        instructions:
+                            createRepairInstructions(
+                                plan
+                            )
+                    };
+
+
+                case "replan":
+                    return {
+                        type:
+                            "replan",
+
+                        reason:
+                            plan.reason
+                    };
+
+
+                case "architecture_required":
+                    return {
+                        type:
+                            "architecture_required",
+
+                        question:
+                            plan.question
+                    };
+
+
+                case "abort":
+                    return {
+                        type:
+                            "abort",
+
+                        reason:
+                            plan.reason
+                    };
+            }
+        }
+
+
+        const legacyAdvisor =
+            this.dependencies
+                .failureAdvisor;
+
+
+        if (!legacyAdvisor) {
+            throw new Error(
+                "No escalation advisor is configured"
+            );
+        }
+
+
+        return legacyAdvisor
+            .advise({
+                run:
+                    input.run,
+
+                contract:
+                    input.contract,
+
+                attempts:
+                    input.attempts,
+
+                verification:
+                    input.verification,
+
+                workerResult:
+                    input.workerResult
+            });
+    }
+
+    private async runIteration(
+        run:
+            AutonomousRun,
+
+        contract:
+            IterationContract
+    ): Promise<IterationExecutionResult> {
+        const record:
+            IterationRecord = {
+                contract,
+
+                attempts:
+                    [],
+
+                completed:
+                    false,
+
+                ...(
+                    run.pendingReplan
+                        ? {
+                            consumedReplan: {
+                                ...run.pendingReplan
+                            }
+                        }
+                        : {}
+                )
+            };
+
+        run.iterations.push(record);
+
+        delete run.pendingReplan;
+
+        await this.persist(run);
+
+        if (
+            this.dependencies
+                .checkpointManager
+        ) {
+            const checkpoint =
+                await this.dependencies
+                    .checkpointManager
+                    .create(
+                        run.id,
+                        contract.id,
+                        contract.scope
+                    );
+
+            record.checkpointId =
+                checkpoint.id;
+
+            await this.record(
+                run,
+                {
+                    runId:
+                        run.id,
+
+                    type:
+                        "checkpoint_created",
+
+                    timestamp:
+                        this.now(),
+
+                    iterationId:
+                        contract.id,
+
+                    details: {
+                        checkpointId:
+                            checkpoint.id
+                    }
+                }
+            );
+        }
+
+        let previousVerification:
+            VerificationReport |
+            undefined;
+
+        let repairInstructions:
+            readonly string[] |
+            undefined;
+
+        let escalationRepairRounds =
+            0;
+
+        let attempt =
+            1;
+
+        while (true) {
+            run.status =
+                attempt === 1
+                    ? "implementing"
+                    : "repairing";
+
+            await this.persist(
+                run
+            );
+
+            const attemptRecord:
+                IterationAttempt = {
+                    attempt,
+
+                    startedAt:
+                        this.now()
+                };
+
+            record.attempts.push(
+                attemptRecord
+            );
+
+            await this.record(
+                run,
+                {
+                    runId:
+                        run.id,
+
+                    type:
+                        "worker_attempt_started",
+
+                    timestamp:
+                        this.now(),
+
+                    iterationId:
+                        contract.id,
+
+                    attempt
+                }
+            );
+
+            try {
+                await this.prepareWorkerWorkspace(
+                    run,
+                    record
+                );
+
+                const workerResult =
+                    await this.dependencies
+                        .worker
+                        .execute({
+                            run,
+
+                            contract,
+
+                            attempt,
+
+                            previousVerification,
+
+                            repairInstructions,
+
+                            workspace:
+                                record.workspace
+                        });
+
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "worker_attempt_completed",
+
+                        timestamp:
+                            this.now(),
+
+                        iterationId:
+                            contract.id,
+
+                        attempt,
+
+                        details: {
+                            summary:
+                                workerResult.summary,
+
+                            changedFiles:
+                                workerResult.changedFiles
+                        }
+                    }
+                );
+
+                run.status =
+                    "verifying";
+
+                await this.persist(
+                    run
+                );
+
+                const verification =
+                    await this.dependencies
+                        .verifier
+                        .verify({
+                            run,
+
+                            contract,
+
+                            attempt,
+
+                            workerResult,
+
+                            workspace:
+                                record.workspace
+                        });
+
+                attemptRecord.verification =
+                    verification;
+
+                attemptRecord.completedAt =
+                    this.now();
+
+                if (
+                    verification.passed
+                ) {
+                    this.prepareAcceptanceState(
+                        run,
+                        record,
+                        attempt,
+                        workerResult
+                    );
+                }
+
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "verification_completed",
+
+                        timestamp:
+                            this.now(),
+
+                        iterationId:
+                            contract.id,
+
+                        attempt,
+
+                        details: {
+                            passed:
+                                verification.passed
+                        }
+                    }
+                );
+
+                if (
+                    record.acceptance?.status ===
+                    "pending"
+                ) {
+                    await this.record(
+                        run,
+                        {
+                            runId:
+                                run.id,
+
+                            type:
+                                "iteration_acceptance_pending",
+
+                            timestamp:
+                                this.now(),
+
+                            iterationId:
+                                contract.id,
+
+                            attempt,
+
+                            details: {
+                                acceptanceId:
+                                    record.acceptance.id,
+
+                                digest:
+                                    record.acceptance.digest
+                            }
+                        }
+                    );
+                }
+
+                if (
+                    verification.passed
+                ) {
+                    await this.acceptWorkerWorkspace(
+                        run,
+                        record,
+                        workerResult
+                    );
+
+                    /*
+                    * Transactional acceptance changes HEAD.
+                    * Release its old checkpoint before marking the
+                    * iteration complete, so recovery can finish this
+                    * transaction if release itself is interrupted.
+                    */
+                    if (
+                        record.acceptance
+                    ) {
+                        await this.releaseCheckpoint(
+                            run,
+                            record
+                        );
+
+                        record.completed =
+                            true;
+
+                        await this.persist(
+                            run
+                        );
+                    } else {
+                        /*
+                        * Preserve legacy worker behaviour.
+                        */
+                        record.completed =
+                            true;
+
+                        await this.persist(
+                            run
+                        );
+
+                        await this.releaseCheckpoint(
+                            run,
+                            record
+                        );
+                    }
+
+                    await this.record(
+                        run,
+                        {
+                            runId:
+                                run.id,
+
+                            type:
+                                "iteration_completed",
+
+                            timestamp:
+                                this.now(),
+
+                            iterationId:
+                                contract.id,
+
+                            attempt
+                        }
+                    );
+
+                    return "completed";
+                }
+
+                previousVerification =
+                    verification;
+
+                repairInstructions =
+                    undefined;
+
+                if (
+                    attempt <
+                    contract.maxLocalAttempts
+                ) {
+                    attempt +=
+                        1;
+                    continue;
+                }
+
+                run.status =
+                    "escalating";
+
+                await this.persist(
+                    run
+                );
+
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "escalation_requested",
+
+                        timestamp:
+                            this.now(),
+
+                        iterationId:
+                            contract.id,
+
+                        attempt
+                    }
+                );
+
+                const escalation =
+                    await this.requestEscalation({
+                        run,
+
+                        contract,
+
+                        record,
+
+                        attempts:
+                            attempt,
+
+                        verification,
+
+                        workerResult
+                    });
+
+                if (
+                    escalation.type ===
+                    "repair"
+                ) {
+                    if (
+                        escalationRepairRounds >=
+                        contract.escalation
+                            .maxRepairRounds
+                    ) {
+                        await this.settleWorkerWorkspace(
+                            run,
+                            record,
+                            "discard",
+                            workerResult
+                        );
+
+                        await this.restoreCheckpoint(
+                            run,
+                            record
+                        );
+
+                        run.status =
+                            "blocked";
+
+                        run.failureReason =
+                            "Escalation repair budget exhausted";
+
+                        await this.persist(
+                            run
+                        );
+
+                        return "stopped";
+                    }
+
+                    escalationRepairRounds +=
+                        1;
+
+                    repairInstructions =
+                        escalation.instructions;
+
+                    previousVerification =
+                        verification;
+
+                    attempt +=
+                        1;
+
+                    await this.record(
+                        run,
+                        {
+                            runId:
+                                run.id,
+
+                            type:
+                                "repair_requested",
+
+                            timestamp:
+                                this.now(),
+
+                            iterationId:
+                                contract.id,
+
+                            attempt,
+
+                            details: {
+                                instructions:
+                                    escalation.instructions
+                            }
+                        }
+                    );
+
+                    continue;
+                }
+
+                if (
+                    escalation.type ===
+                    "abort"
+                ) {
+                    await this.settleWorkerWorkspace(
+                        run,
+                        record,
+                        "discard",
+                        workerResult
+                    );
+
+                    await this.restoreCheckpoint(
+                        run,
+                        record
+                    );
+
+                    run.status =
+                        "failed";
+
+                    run.failureReason =
+                        escalation.reason;
+
+                    await this.persist(
+                        run
+                    );
+
+                    await this.record(
+                        run,
+                        {
+                            runId:
+                                run.id,
+
+                            type:
+                                "run_failed",
+
+                            timestamp:
+                                this.now(),
+
+                            details: {
+                                reason:
+                                    escalation.reason
+                            }
+                        }
+                    );
+
+                    return "stopped";
+                }
+
+                if (
+                    escalation.type ===
+                    "architecture_required"
+                ) {
+                    await this.settleWorkerWorkspace(
+                        run,
+                        record,
+                        "discard",
+                        workerResult
+                    );
+
+                    await this.restoreCheckpoint(
+                        run,
+                        record
+                    );
+
+                    run.status =
+                        "blocked";
+
+                    run.failureReason =
+                        escalation.question;
+
+                    await this.persist(
+                        run
+                    );
+
+                    await this.record(
+                        run,
+                        {
+                            runId:
+                                run.id,
+
+                            type:
+                                "run_blocked",
+
+                            timestamp:
+                                this.now(),
+
+                            details: {
+                                reason:
+                                    escalation.question
+                            }
+                        }
+                    );
+
+                    return "stopped";
+                }
+
+                if (
+                    escalation.type ===
+                    "replan"
+                ) {
+                    await this.settleWorkerWorkspace(
+                        run,
+                        record,
+                        "discard",
+                        workerResult
+                    );
+
+                    await this.restoreCheckpoint(
+                        run,
+                        record
+                    );
+
+                    const recordIndex =
+                        run.iterations.indexOf(
+                            record
+                        );
+
+                    if (
+                        record.consumedReplan &&
+                        run.pendingReplan
+                    ) {
+                        throw new Error(
+                            "Cannot safely recover run: conflicting pending replan state"
+                        );
+                    }
+
+                    if (
+                        recordIndex >=
+                        0
+                    ) {
+                        run.iterations.splice(
+                            recordIndex,
+                            1
+                        );
+                    }
+
+                    const previousCount =
+                        run.consecutiveReplans ?? 0;
+
+                    if (
+                        !Number.isSafeInteger(previousCount) ||
+                        previousCount < 0
+                    ) {
+                        throw new Error(
+                            "Invalid persisted consecutive replan count"
+                        );
+                    }
+
+                    run.consecutiveReplans =
+                        previousCount + 1;
+
+                    if (
+                        run.consecutiveReplans >
+                        this.maxConsecutiveReplans
+                    ) {
+                        delete run.pendingReplan;
+
+                        run.status = "blocked";
+
+                        run.failureReason =
+                            `Consecutive replan budget exhausted (${this.maxConsecutiveReplans})`;
+
+                        await this.persist(run);
+
+                        await this.record(run, {
+                            runId: run.id,
+                            type: "run_blocked",
+                            timestamp: this.now(),
+
+                            details: {
+                                reason: run.failureReason
+                            }
+                        });
+
+                        return "stopped";
+                    }
+
+                    if (
+                        record.consumedReplan
+                    ) {
+                        run.pendingReplan = {
+                            ...record.consumedReplan
+                        };
+                    }
+
+                    const replan:
+                        PlanningContextReplanInput = {
+                            previousIterationId:
+                                contract.id,
+
+                            previousObjective:
+                                contract.objective,
+
+                            reason:
+                                escalation.reason
+                        };
+
+
+                    run.pendingReplan =
+                        replan;
+
+                    await this.persist(
+                        run
+                    );
+
+                    await this.record(
+                        run,
+                        {
+                            runId:
+                                run.id,
+
+                            type:
+                                "iteration_replanned",
+
+                            timestamp:
+                                this.now(),
+
+                            iterationId:
+                                contract.id,
+
+                            details: {
+                                reason:
+                                    escalation.reason
+                            }
+                        }
+                    );
+
+                    return {
+                        type:
+                            "replan",
+
+                        replan
+                    };
+                }
+
+                return "stopped";
+            } catch (error) {
+                if (
+                    isRetryableCodingHarnessError(
+                        error
+                    ) &&
+                    attempt <
+                        contract.maxLocalAttempts
+                ) {
+                    const message =
+                        getErrorMessage(
+                            error
+                        );
+
+
+                    attemptRecord.error =
+                        message;
+
+                    attemptRecord.completedAt =
+                        this.now();
+
+
+                    /*
+                     * Surgical application is transactional:
+                     *
+                     * validation failures mutate nothing and runtime
+                     * application failures are rolled back before the
+                     * error escapes. Therefore the same isolated
+                     * workspace is safe to reuse for the next model
+                     * attempt.
+                     */
+                    previousVerification =
+                        undefined;
+
+                    repairInstructions = [
+                        [
+                            "The previous coding response could not be applied safely.",
+                            message
+                        ].join(
+                            " "
+                        ),
+
+                        [
+                            "Re-read the current repositoryFiles and return a corrected surgical edit batch.",
+                            "Every replace oldText and every insert anchor must exactly match the current file state.",
+                            "Use small unique anchors and do not repeat the rejected patch."
+                        ].join(
+                            " "
+                        )
+                    ];
+
+
+                    attempt +=
+                        1;
+
+
+                    await this.record(
+                        run,
+                        {
+                            runId:
+                                run.id,
+
+                            type:
+                                "repair_requested",
+
+                            timestamp:
+                                this.now(),
+
+                            iterationId:
+                                contract.id,
+
+                            attempt,
+
+                            details: {
+                                instructions:
+                                    repairInstructions
+                            }
+                        }
+                    );
+
+
+                    continue;
+                }
+
+                if (
+                    record.acceptance
+                ) {
+                    /*
+                    * Never roll back a transaction once durable acceptance has
+                    * started. Promotion/commit may already have happened.
+                    * Recovery will replay acceptance safely.
+                    */
+                    run.status =
+                        "committing";
+
+                    await this.persist(
+                        run
+                    );
+
+                    throw error;
+                }
+
+                const failureMessages: string[] = [
+                    getErrorMessage(
+                        error
+                    )
+                ];
+
+                try {
+                    await this.settleWorkerWorkspace(
+                        run,
+                        record,
+                        "discard"
+                    );
+                } catch (cleanupError) {
+                    failureMessages.push(
+                        `Worker workspace cleanup failed: ${getErrorMessage(
+                            cleanupError
+                        )}`
+                    );
+                }
+
+                try {
+                    await this.restoreCheckpoint(
+                        run,
+                        record
+                    );
+                } catch (restoreError) {
+                    failureMessages.push(
+                        `Checkpoint restore failed: ${getErrorMessage(
+                            restoreError
+                        )}`
+                    );
+                }
+
+                attemptRecord.error =
+                    failureMessages.join(
+                        "; "
+                    );
+
+                attemptRecord.completedAt =
+                    this.now();
+
+                run.status =
+                    "failed";
+
+                run.failureReason =
+                    attemptRecord.error;
+
+                await this.persist(
+                    run
+                );
+
+                await this.record(
+                    run,
+                    {
+                        runId:
+                            run.id,
+
+                        type:
+                            "run_failed",
+
+                        timestamp:
+                            this.now(),
+
+                        details: {
+                            reason:
+                                attemptRecord.error
+                        }
+                    }
+                );
+
+                return "stopped";
+            }
+        }
+    }
+
+    private async releaseCheckpoint(
+        run:
+            AutonomousRun,
+
+        record:
+            IterationRecord
+    ): Promise<void> {
+        const checkpointId =
+            record.checkpointId;
+
+        const manager =
+            this.dependencies
+                .checkpointManager;
+
+        if (
+            !checkpointId ||
+            !manager
+        ) {
+            return;
+        }
+
+        record.checkpointId =
+            undefined;
+
+        await this.persist(
+            run
+        );
+
+        await manager.release({
+            id:
+                checkpointId
+        });
+
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    "checkpoint_released",
+
+                timestamp:
+                    this.now(),
+
+                iterationId:
+                    record.contract.id,
+
+                details: {
+                    checkpointId
+                }
+            }
+        );
+    }
+
+
+    private async restoreCheckpoint(
+        run:
+            AutonomousRun,
+
+        record:
+            IterationRecord
+    ): Promise<void> {
+        const checkpointId =
+            record.checkpointId;
+
+        const manager =
+            this.dependencies
+                .checkpointManager;
+
+        if (
+            !checkpointId ||
+            !manager
+        ) {
+            return;
+        }
+
+        await manager.restore({
+            id:
+                checkpointId
+        });
+
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    "checkpoint_restored",
+
+                timestamp:
+                    this.now(),
+
+                iterationId:
+                    record.contract.id,
+
+                details: {
+                    checkpointId
+                }
+            }
+        );
+
+        await this.releaseCheckpoint(
+            run,
+            record
+        );
+    }
+
+    private async persist(
+        run:
+            AutonomousRun
+    ): Promise<void> {
+        run.updatedAt =
+            this.now();
+
+        if (
+            this.dependencies
+                .runStore
+        ) {
+            await this.dependencies
+                .runStore
+                .save(
+                    run
+                );
+        }
+    }
+
+
+    private async record(
+        run:
+            AutonomousRun,
+
+        event:
+            AutonomyEvent
+    ): Promise<void> {
+        if (
+            this.dependencies
+                .eventJournal
+        ) {
+            await this.dependencies
+                .eventJournal
+                .append(
+                    event
+                );
+        }
+
+        await this.persist(
+            run
+        );
+    }
+
+    private async prepareWorkerWorkspace(
+        run:
+            AutonomousRun,
+
+        record:
+            IterationRecord
+    ): Promise<void> {
+        if (
+            record.workspace
+        ) {
+            return;
+        }
+
+        const worker =
+            this.dependencies
+                .worker;
+
+        if (
+            !worker.prepare
+        ) {
+            return;
+        }
+
+        if (
+            !worker.settle
+        ) {
+            throw new Error(
+                "Coding worker with prepare() must also implement settle()"
+            );
+        }
+
+        const workspace =
+            await worker.prepare({
+                run,
+
+                contract:
+                    record.contract
+            });
+
+        if (!workspace) {
+            return;
+        }
+
+        record.workspace =
+            workspace;
+
+        /*
+        * Persist before doing any coding in the workspace.
+        * Recovery must know that the workspace exists.
+        */
+        await this.persist(
+            run
+        );
+
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    "worker_workspace_prepared",
+
+                timestamp:
+                    this.now(),
+
+                iterationId:
+                    record.contract.id,
+
+                details: {
+                    workspaceId:
+                        workspace.id,
+
+                    baseRevision:
+                        workspace.baseRevision
+                }
+            }
+        );
+    }
+
+
+    private async settleWorkerWorkspace(
+        run:
+            AutonomousRun,
+
+        record:
+            IterationRecord,
+
+        outcome:
+            "accept" | "discard",
+
+        workerResult?:
+            WorkerResult
+    ): Promise<void> {
+        const workspace =
+            record.workspace;
+
+        if (!workspace) {
+            return;
+        }
+
+        const worker =
+            this.dependencies
+                .worker;
+
+        if (!worker.settle) {
+            throw new Error(
+                "Active worker workspace cannot be settled because worker.settle() is unavailable"
+            );
+        }
+
+        await worker.settle({
+            run,
+
+            contract:
+                record.contract,
+
+            workspace,
+
+            outcome,
+
+            workerResult
+        });
+
+        /*
+        * Clear only AFTER settlement succeeds.
+        * If the process dies during settlement, recovery can retry it.
+        */
+        delete record.workspace;
+
+        await this.persist(
+            run
+        );
+
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    "worker_workspace_settled",
+
+                timestamp:
+                    this.now(),
+
+                iterationId:
+                    record.contract.id,
+
+                details: {
+                    workspaceId:
+                        workspace.id,
+
+                    outcome
+                }
+            }
+        );
+    }
+
+    private prepareAcceptanceState(
+        run:
+            AutonomousRun,
+
+        record:
+            IterationRecord,
+
+        attempt:
+            number,
+
+        workerResult:
+            WorkerResult
+    ): void {
+        if (
+            record.acceptance
+        ) {
+            return;
+        }
+
+        const workspace =
+            record.workspace;
+
+        const digest =
+            workerResult
+                .changeSet
+                ?.digest;
+
+        if (
+            !workspace ||
+            !digest
+        ) {
+            return;
+        }
+
+        record.acceptance = {
+            id:
+                randomUUID(),
+
+            status:
+                "pending",
+
+            attempt,
+
+            baseRevision:
+                workspace.baseRevision,
+
+            digest,
+
+            changedFiles: [
+                ...workerResult.changedFiles
+            ],
+
+            createdAt:
+                this.now()
+        };
+
+        run.status =
+            "committing";
+    }
+
+    private async acceptWorkerWorkspace(
+        run:
+            AutonomousRun,
+
+        record:
+            IterationRecord,
+
+        workerResult:
+            WorkerResult
+    ): Promise<void> {
+        const acceptance =
+            record.acceptance;
+
+        if (!acceptance) {
+            await this.settleWorkerWorkspace(
+                run,
+                record,
+                "accept",
+                workerResult
+            );
+
+            return;
+        }
+
+        const workspace =
+            record.workspace;
+
+        if (!workspace) {
+            throw new Error(
+                "Pending iteration acceptance requires an active worker workspace"
+            );
+        }
+
+        const worker =
+            this.dependencies
+                .worker;
+
+        if (!worker.settle) {
+            throw new Error(
+                "Pending iteration acceptance requires worker settlement support"
+            );
+        }
+
+        const result =
+            await worker.settle({
+                run,
+
+                contract:
+                    record.contract,
+
+                workspace,
+
+                outcome:
+                    "accept",
+
+                workerResult,
+
+                acceptanceId:
+                    acceptance.id
+            });
+
+        const acceptedRevision =
+            result?.acceptedRevision;
+
+        if (!acceptedRevision) {
+            throw new Error(
+                "Transactional worker did not return an accepted revision"
+            );
+        }
+
+        acceptance.status =
+            "accepted";
+
+        acceptance.acceptedRevision =
+            acceptedRevision;
+
+        acceptance.acceptedAt =
+            this.now();
+
+        /*
+        * Persist accepted revision before clearing the workspace ref.
+        */
+        await this.persist(
+            run
+        );
+
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    "iteration_acceptance_accepted",
+
+                timestamp:
+                    this.now(),
+
+                iterationId:
+                    record.contract.id,
+
+                details: {
+                    acceptanceId:
+                        acceptance.id,
+
+                    acceptedRevision
+                }
+            }
+        );
+
+        delete record.workspace;
+
+        await this.persist(
+            run
+        );
+
+        await this.record(
+            run,
+            {
+                runId:
+                    run.id,
+
+                type:
+                    "worker_workspace_settled",
+
+                timestamp:
+                    this.now(),
+
+                iterationId:
+                    record.contract.id,
+
+                details: {
+                    workspaceId:
+                        workspace.id,
+
+                    outcome:
+                        "accept"
+                }
+            }
+        );
+    }
+}
+
+function getErrorMessage(
+    error:
+        unknown
+): string {
+    return error instanceof
+        Error
+        ? error.message
+        : String(
+            error
+        );
+}
+
+function createRepairInstructions(
+    plan:
+        RepairExecutionPlan
+): readonly string[] {
+    const instructions:
+        string[] = [
+            `Repair diagnosis: ${plan.diagnosis}`,
+
+            `Failed deterministic checks: ${plan.failedChecks.join(
+                ", "
+            )}`,
+
+            ...plan.instructions
+        ];
+
+
+    if (
+        plan.filesHint.length >
+        0
+    ) {
+        instructions.push(
+            [
+                "Prioritize these files while repairing:",
+                plan.filesHint.join(
+                    ", "
+                )
+            ].join(
+                " "
+            )
+        );
+    }
+
+
+    for (
+        const invariant of
+        plan.preserve
+    ) {
+        instructions.push(
+            `Preserve: ${invariant}`
+        );
+    }
+
+
+    return instructions;
+}
