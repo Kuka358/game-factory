@@ -34,3 +34,23 @@ export type {
     TaskGraphValidationError,
     TaskGraphValidationResult
 } from "./validation/TaskGraphValidator.js";
+
+export {
+    CloudGameArchitect
+} from "./cloud/CloudGameArchitect.js";
+
+export type {
+    CloudGameArchitectOptions,
+    ArchitectInput,
+    ArchitectResult
+} from "./cloud/CloudGameArchitect.js";
+
+export {
+    CloudGamePlanner
+} from "./cloud/CloudGamePlanner.js";
+
+export type {
+    CloudGamePlannerOptions,
+    GamePlanningInput,
+    GamePlanningResult
+} from "./cloud/CloudGamePlanner.js";
