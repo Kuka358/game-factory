@@ -267,4 +267,58 @@ describe("CloudGamePlanner", () => {
             })
         ).toThrow("model is required");
     });
+
+
+    it("repairs invalid IDs and empty write scopes", async () => {
+        const invalidGraph = createTaskGraph();
+
+        invalidGraph.tasks[0]!.id = "Foundation Task";
+        invalidGraph.tasks[1]!.allowedPaths = [];
+
+        const requests: AIRequest[] = [];
+        let calls = 0;
+
+        const provider: AIProvider = {
+            id: "fake-cloud",
+
+            async generate<T>(
+                request: AIRequest
+            ): Promise<AIResponse<T>> {
+                requests.push(request);
+                calls += 1;
+
+                return {
+                    data: (
+                        calls === 1
+                            ? invalidGraph
+                            : createTaskGraph()
+                    ) as T,
+                    provider: "fake-cloud",
+                    model: request.model
+                };
+            }
+        };
+
+        const planner = new CloudGamePlanner({
+            provider,
+            model: "test-planner-model"
+        });
+
+        const result = await planner.plan({
+            blueprint: createBlueprint()
+        });
+
+        expect(calls).toBe(2);
+        expect(result.graph.tasks).toHaveLength(2);
+        expect(result.graph.tasks[0]?.id).toBe("foundation");
+
+        const secondRequest = JSON.stringify(
+            requests[1]?.messages
+        );
+
+        expect(secondRequest).toContain("allowedPaths");
+        expect(secondRequest).toContain("id");
+        expect(secondRequest).toContain("PREVIOUS PLAN WAS REJECTED");
+    });
+
 });

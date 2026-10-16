@@ -260,6 +260,9 @@ importers:
       '@game-factory/ai':
         specifier: workspace:*
         version: link:../ai
+      '@game-factory/autonomy':
+        specifier: workspace:*
+        version: link:../autonomy
       ajv:
         specifier: ^8.20.0
         version: 8.20.0

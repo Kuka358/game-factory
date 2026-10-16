@@ -166,7 +166,7 @@ describe("CloudGameArchitect", () => {
                 prompt: "Make Breakout",
                 target: "web"
             })
-        ).rejects.toThrow("target mismatch");
+        ).rejects.toThrow("Target must be web");
     });
 
     it("rejects an empty prompt", async () => {
@@ -197,6 +197,46 @@ describe("CloudGameArchitect", () => {
 
         await expect(
             architect.design({ prompt: "Make Breakout" })
-        ).rejects.toThrow("offline runtime");
+        ).rejects.toThrow("offlineRuntime must be true");
     });
+
+    it("repairs an invalid Blueprint on the second attempt", async () => {
+        let calls = 0;
+
+        const provider: AIProvider = {
+            id: "fake-cloud",
+
+            async generate<T>(
+                request: AIRequest
+            ): Promise<AIResponse<T>> {
+                calls += 1;
+
+                const data = calls === 1
+                    ? {
+                        ...createBlueprint(),
+                        id: "Breakout Game"
+                    }
+                    : createBlueprint();
+
+                return {
+                    data: data as T,
+                    provider: "fake-cloud",
+                    model: request.model
+                };
+            }
+        };
+
+        const architect = new CloudGameArchitect({
+            provider,
+            model: "test-cloud-model"
+        });
+
+        const result = await architect.design({
+            prompt: "Make Breakout"
+        });
+
+        expect(calls).toBe(2);
+        expect(result.blueprint.id).toBe("breakout");
+    });
+
 });

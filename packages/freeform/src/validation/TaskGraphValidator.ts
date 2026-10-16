@@ -263,6 +263,31 @@ export function validateTaskGraph(
         return { valid: false, errors };
     }
 
+
+    // A browser smoke test must run on a terminal task.
+    // Earlier tasks may not have a fully integrated game yet.
+    const tasksWithDependents = new Set(
+        tasks.flatMap(task => task.dependsOn)
+    );
+
+    tasks.forEach((task, index) => {
+        if (
+            task.checks.includes("browser_smoke") &&
+            tasksWithDependents.has(task.id)
+        ) {
+            errors.push({
+                path: `/tasks/${index}/checks`,
+                message:
+                    "browser_smoke is only allowed on a terminal task"
+            });
+        }
+    });
+
+    if (errors.length > 0) {
+        return { valid: false, errors };
+    }
+
+
     function dependsOn(
         taskId: string,
         dependencyId: string

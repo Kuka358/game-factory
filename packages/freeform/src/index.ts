@@ -54,3 +54,11 @@ export type {
     GamePlanningInput,
     GamePlanningResult
 } from "./cloud/CloudGamePlanner.js";
+
+export {
+    TaskGraphAutonomyPlanner
+} from "./autonomy/TaskGraphAutonomyPlanner.js";
+
+export type {
+    TaskGraphAutonomyPlannerOptions
+} from "./autonomy/TaskGraphAutonomyPlanner.js";

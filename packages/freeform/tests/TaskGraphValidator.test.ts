@@ -159,6 +159,35 @@ describe("validateTaskGraph", () => {
         ).toBe(true);
     });
 
+    it("rejects premature browser smoke", () => {
+        const value = graph();
+
+        value.tasks[0]!.checks = ["tsc", "browser_smoke"];
+
+        const result = validateTaskGraph(value, "breakout");
+
+        expect(result.valid).toBe(false);
+
+        if (!result.valid) {
+            expect(result.errors).toContainEqual({
+                path: "/tasks/0/checks",
+                message:
+                    "browser_smoke is only allowed on a terminal task"
+            });
+        }
+    });
+
+    it("allows browser smoke on a terminal task", () => {
+        const value = graph();
+
+        value.tasks[1]!.checks = ["tsc", "browser_smoke"];
+
+        const result = validateTaskGraph(value, "breakout");
+
+        expect(result.valid).toBe(true);
+    });
+
+
     it("rejects unknown object properties", () => {
         invalid({
             ...graph(),

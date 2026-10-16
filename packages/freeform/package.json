@@ -11,8 +11,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "ajv": "^8.20.0",
-    "@game-factory/ai": "workspace:*"
+    "@game-factory/ai": "workspace:*",
+    "@game-factory/autonomy": "workspace:*",
+    "ajv": "^8.20.0"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

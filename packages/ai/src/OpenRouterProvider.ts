@@ -14,6 +14,8 @@ export interface OpenRouterProviderOptions {
 
     appName?:
         string;
+
+    reasoningEffort?: "low" | "medium" | "high";
 }
 
 export class OpenRouterProvider
@@ -53,12 +55,17 @@ export class OpenRouterProvider
 
             bodyExtras: {
                 provider: {
-                    require_parameters:
-                        true,
+                    require_parameters: true,
+                    allow_fallbacks: true
+                },
 
-                    allow_fallbacks:
-                        true
-                }
+                ...(options.reasoningEffort
+                    ? {
+                        reasoning: {
+                            effort: options.reasoningEffort
+                        }
+                    }
+                    : {})
             }
         });
     }
