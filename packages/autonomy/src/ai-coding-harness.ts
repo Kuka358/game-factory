@@ -7,6 +7,9 @@ import {
     resolve
 } from "node:path";
 
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
 import type {
     AIProvider
 } from "@game-factory/ai";
@@ -53,6 +56,8 @@ import {
     RetryableCodingHarnessError
 } from "./harness.js";
 
+const execFileAsync = promisify(execFile);
+
 export interface AICodingHarnessOptions {
     provider:
         AIProvider;
@@ -95,6 +100,8 @@ export interface AICodingHarnessOptions {
             observation:
                 TokenEstimateCalibrationObservation
         ) => void;
+
+    allowFullRepairOfNewFiles?: boolean;
 }
 
 interface AIFileEditPayload {
@@ -408,6 +415,11 @@ export class AICodingHarness
                 promptContext.files
             );
 
+            const fullReplacePaths =
+                await this.findRepairableNewFiles(
+                    input,
+                    result.edits
+                );
 
             const changedFiles =
                 await this.editApplicator.apply({
@@ -418,7 +430,9 @@ export class AICodingHarness
                         input.contract.scope,
 
                     edits:
-                        result.edits
+                        result.edits,
+
+                    fullReplacePaths
                 });
 
 
@@ -1244,6 +1258,90 @@ export class AICodingHarness
                 discovered.inventory
         };
     }
+
+    private async findRepairableNewFiles(
+        input: CodingHarnessInput,
+        edits: readonly SurgicalFileEdit[]
+    ): Promise<string[]> {
+        if (
+            !this.options.allowFullRepairOfNewFiles ||
+            input.attempt <= 1 ||
+            input.previousVerification?.passed !== false
+        ) {
+            return [];
+        }
+
+        const paths = [
+            ...new Set(
+                edits
+                    .filter(edit => edit.operation === "replace")
+                    .map(edit => normalizeRepositoryPath(edit.path))
+            )
+        ];
+
+        if (paths.length === 0) {
+            return [];
+        }
+
+        const runGit = async (
+            args: string[]
+        ): Promise<string> => {
+            const { stdout } = await execFileAsync(
+                "git",
+                [
+                    ...(process.platform === "win32"
+                        ? ["-c", "core.longpaths=true"]
+                        : []),
+                    ...args
+                ],
+                {
+                    cwd: input.repositoryRoot,
+                    windowsHide: true,
+                    encoding: "utf8",
+                    timeout: 30_000
+                }
+            );
+
+            return stdout;
+        };
+
+        // Which candidates were already present in the
+        // worktree's initial Git commit?
+        const baseline = await runGit([
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "-z",
+            "HEAD",
+            "--",
+            ...paths
+        ]);
+
+        const baselinePaths = new Set(
+            baseline.split("\0").filter(Boolean)
+        );
+
+        // Which candidates are currently real untracked
+        // (non-ignored) files in this worktree?
+        const untracked = await runGit([
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "--",
+            ...paths
+        ]);
+
+        const untrackedPaths = new Set(
+            untracked.split("\0").filter(Boolean)
+        );
+
+        return paths.filter(path =>
+            !baselinePaths.has(path) &&
+            untrackedPaths.has(path)
+        );
+    }
+
 }
 
 

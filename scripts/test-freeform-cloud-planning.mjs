@@ -63,13 +63,13 @@ const provider = new OpenRouterProvider({
 const architect = new CloudGameArchitect({
     provider,
     model: architectModel,
-    maxTokens: 16000
+    maxTokens: 32000
 });
 
 const planner = new CloudGamePlanner({
     provider,
     model: plannerModel,
-    maxTokens: 16000
+    maxTokens: 32000
 });
 
 const outputDir = await mkdtemp(

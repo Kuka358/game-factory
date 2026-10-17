@@ -27,16 +27,12 @@ import {
     normalizeRepositoryPath
 } from "./workspace.js";
 
-
 export interface SurgicalEditApplicationInput {
-    repositoryRoot:
-        string;
+    repositoryRoot: string;
+    scope: IterationScope;
+    edits: readonly SurgicalFileEdit[];
 
-    scope:
-        IterationScope;
-
-    edits:
-        readonly SurgicalFileEdit[];
+    fullReplacePaths?: readonly string[];
 }
 
 
@@ -86,16 +82,13 @@ export class SurgicalEditApplicator
                 edits
             );
 
-
-        /*
-         * planSurgicalEdits performs all semantic checks entirely
-         * in memory.
-         */
-        const plan =
-            planSurgicalEdits(
-                snapshots,
-                edits
-            );
+        const plan = planSurgicalEdits(
+            snapshots,
+            edits,
+            {
+                fullReplacePaths: input.fullReplacePaths
+            }
+        );
 
 
         const prepared =

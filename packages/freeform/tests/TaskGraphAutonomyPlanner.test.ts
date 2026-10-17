@@ -17,6 +17,25 @@ import {
     TaskGraphAutonomyPlanner
 } from "../src/autonomy/TaskGraphAutonomyPlanner.js";
 
+import type {
+    RecoveredTaskGraphProgress
+} from "../src/autonomy/TaskGraphProgressRecovery.js";
+
+
+function recovered(
+    ...taskIds: string[]
+): RecoveredTaskGraphProgress {
+    return {
+        head: "a".repeat(40),
+        completedTasks: taskIds.map(taskId => ({
+            taskId,
+            runId: "previous-autonomy-run",
+            acceptedRevision: "b".repeat(40)
+        }))
+    };
+}
+
+
 function blueprint(): FreeformBlueprint {
     return {
         schemaVersion: "1.0",
@@ -206,4 +225,67 @@ describe("TaskGraphAutonomyPlanner", () => {
 
         expect(decision.type).toBe("blocked");
     });
+
+    it("skips previously accepted foundation", async () => {
+        const subject = new TaskGraphAutonomyPlanner({
+            blueprint: blueprint(),
+            graph: graph(),
+            availableChecks: ["tsc", "browser_smoke"],
+            recoveredProgress: recovered("foundation")
+        });
+
+        const decision = await subject.plan(planningInput());
+
+        expect(decision.type).toBe("iteration");
+
+        if (decision.type === "iteration") {
+            expect(decision.contract.id).toBe("integrate");
+        }
+    });
+
+    it("allows a budget covering only remaining tasks", async () => {
+        const subject = new TaskGraphAutonomyPlanner({
+            blueprint: blueprint(),
+            graph: graph(),
+            availableChecks: ["tsc", "browser_smoke"],
+            recoveredProgress: recovered("foundation")
+        });
+
+        const input = planningInput();
+
+        input.context.progress.maxIterations = 1;
+        input.context.progress.remainingIterations = 1;
+
+        const decision = await subject.plan(input);
+
+        expect(decision.type).toBe("iteration");
+
+        if (decision.type === "iteration") {
+            expect(decision.contract.id).toBe("integrate");
+        }
+    });
+
+    it("rejects unknown recovered tasks", () => {
+        expect(() => new TaskGraphAutonomyPlanner({
+            blueprint: blueprint(),
+            graph: graph(),
+            availableChecks: ["tsc", "browser_smoke"],
+            recoveredProgress: recovered("unknown-task")
+        })).toThrow(
+            "Recovered progress references unknown task"
+        );
+    });
+
+    it("rejects duplicate recovered tasks", () => {
+        expect(() => new TaskGraphAutonomyPlanner({
+            blueprint: blueprint(),
+            graph: graph(),
+            availableChecks: ["tsc", "browser_smoke"],
+            recoveredProgress: recovered(
+                "foundation",
+                "foundation"
+            )
+        })).toThrow("Duplicate recovered task");
+    });
+
 });

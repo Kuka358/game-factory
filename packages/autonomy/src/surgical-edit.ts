@@ -129,6 +129,15 @@ const MAX_SURGICAL_REPLACE_COVERAGE =
     0.8;
 
 
+export interface SurgicalEditPlanningOptions {
+    /**
+     * Trusted caller-only exception.
+     * Never populated directly from an AI response.
+     */
+    fullReplacePaths?: readonly string[];
+}
+
+
 /**
  * Validate and calculate a complete edit batch entirely in memory.
  *
@@ -136,12 +145,16 @@ const MAX_SURGICAL_REPLACE_COVERAGE =
  * complete batch fails and no mutation plan is returned.
  */
 export function planSurgicalEdits(
-    snapshots:
-        readonly SurgicalFileSnapshot[],
-
-    edits:
-        readonly SurgicalFileEdit[]
+    snapshots: readonly SurgicalFileSnapshot[],
+    edits: readonly SurgicalFileEdit[],
+    options: SurgicalEditPlanningOptions = {}
 ): PlannedSurgicalFileMutation[] {
+    const fullReplacePaths = new Set(
+        (options.fullReplacePaths ?? []).map(
+            path => normalizeSurgicalPath(path)
+        )
+    );
+
     const states =
         new Map<
             string,
@@ -324,13 +337,15 @@ export function planSurgicalEdits(
                     );
 
 
+                const allowFullReplace =
+                    fullReplacePaths.has(path);
                 /*
                 * Treat LF and CRLF as equivalent for the complete-file
                 * rewrite guard.
                 */
                 if (
-                    normalizedOldText ===
-                    normalizedCurrentContent
+                    !allowFullReplace &&
+                    normalizedOldText === normalizedCurrentContent
                 ) {
                     throw new Error(
                         `Surgical replace must not replace the complete existing file: ${path}`
@@ -365,8 +380,9 @@ export function planSurgicalEdits(
 
 
                 if (
+                    !allowFullReplace &&
                     replacementCoverage >
-                    MAX_SURGICAL_REPLACE_COVERAGE
+                        MAX_SURGICAL_REPLACE_COVERAGE
                 ) {
                     throw new Error(
                         [

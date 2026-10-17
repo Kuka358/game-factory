@@ -128,6 +128,65 @@ describe(
             }
         );
 
+        it(
+            "allows a trusted full-file repair without changing the default guard",
+            () => {
+                const original =
+                    "export const value: string = 123;\n";
+
+                const replacement =
+                    'export const value: string = "fixed";\n';
+
+                const snapshots = [{
+                    path: "src/new.ts",
+                    content: original
+                }];
+
+                const edits = [{
+                    operation: "replace" as const,
+                    path: "src/new.ts",
+                    oldText: original,
+                    newText: replacement
+                }];
+
+                // The existing protection remains active.
+                expect(() =>
+                    planSurgicalEdits(snapshots, edits)
+                ).toThrow(
+                    "must not replace the complete existing file"
+                );
+
+                // Explicit trusted authorization permits repair.
+                expect(
+                    planSurgicalEdits(
+                        snapshots,
+                        edits,
+                        {
+                            fullReplacePaths: ["src/new.ts"]
+                        }
+                    )
+                ).toEqual([{
+                    path: "src/new.ts",
+                    operation: "write",
+                    originalContent: original,
+                    content: replacement
+                }]);
+
+                // Authorization is per-file.
+                expect(() =>
+                    planSurgicalEdits(
+                        snapshots,
+                        edits,
+                        {
+                            fullReplacePaths: ["src/other.ts"]
+                        }
+                    )
+                ).toThrow(
+                    "must not replace the complete existing file"
+                );
+            }
+        );
+
 
         it(
             "applies multiple replacements to the same virtual file in order",

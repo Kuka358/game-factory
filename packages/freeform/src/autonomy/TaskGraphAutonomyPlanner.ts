@@ -25,16 +25,29 @@ import {
     validateTaskGraph
 } from "../validation/TaskGraphValidator.js";
 
+import type {
+    RecoveredTaskGraphProgress
+} from "./TaskGraphProgressRecovery.js";
+
+
 export interface TaskGraphAutonomyPlannerOptions {
     blueprint: FreeformBlueprint;
     graph: TaskGraph;
 
     // Must correspond to commands registered by the runner.
     availableChecks: readonly TaskCheck[];
+
+    // Verified accepted tasks from a previous Autonomy run.
+    // The runner must obtain this from TaskGraphProgressRecovery
+    // against the current game repository HEAD.
+    recoveredProgress?: RecoveredTaskGraphProgress;
 }
+
 
 export class TaskGraphAutonomyPlanner implements Planner {
     private readonly graph: TaskGraph;
+
+    private readonly recoveredTaskIds: ReadonlySet<string>;
 
     constructor(
         options: TaskGraphAutonomyPlannerOptions
@@ -87,6 +100,65 @@ export class TaskGraphAutonomyPlanner implements Planner {
         }
 
         this.graph = result.data;
+
+        const recovered = options.recoveredProgress;
+
+        const knownTaskIds = new Set(
+            result.data.tasks.map(task => task.id)
+        );
+
+        const acceptedTaskIds = new Set<string>();
+
+        if (recovered) {
+            if (!/^[0-9a-f]{40}$/.test(recovered.head)) {
+                throw new Error(
+                    "Recovered progress has invalid Git HEAD"
+                );
+            }
+
+            for (const item of recovered.completedTasks) {
+                if (!knownTaskIds.has(item.taskId)) {
+                    throw new Error(
+                        `Recovered progress references unknown task: ${item.taskId}`
+                    );
+                }
+
+                if (acceptedTaskIds.has(item.taskId)) {
+                    throw new Error(
+                        `Duplicate recovered task: ${item.taskId}`
+                    );
+                }
+
+                if (
+                    !/^[0-9a-f]{40}$/.test(item.acceptedRevision)
+                ) {
+                    throw new Error(
+                        `Invalid accepted revision: ${item.taskId}`
+                    );
+                }
+
+                acceptedTaskIds.add(item.taskId);
+            }
+
+            // Recovered tasks must form a dependency-closed set.
+            for (const task of result.data.tasks) {
+                if (!acceptedTaskIds.has(task.id)) {
+                    continue;
+                }
+
+                if (
+                    !task.dependsOn.every(
+                        id => acceptedTaskIds.has(id)
+                    )
+                ) {
+                    throw new Error(
+                        `Recovered task dependencies are incomplete: ${task.id}`
+                    );
+                }
+            }
+        }
+
+        this.recoveredTaskIds = acceptedTaskIds;
     }
 
     async plan(
@@ -118,22 +190,39 @@ export class TaskGraphAutonomyPlanner implements Planner {
             };
         }
 
+        const remainingTaskCount =
+            this.graph.tasks.length -
+            this.recoveredTaskIds.size;
+
         if (
             context.progress.maxIterations <
-            this.graph.tasks.length
+            remainingTaskCount
         ) {
             return {
                 type: "blocked",
                 reason:
-                    "Autonomy iteration budget is too small"
+                    "Autonomy iteration budget is too small " +
+                    "for remaining TaskGraph tasks"
             };
         }
 
-        const completed = new Set(
-            context.completedIterations.map(item =>
-                item.id
-            )
+        const knownTaskIds = new Set(
+            this.graph.tasks.map(task => task.id)
         );
+
+        const completed = new Set(this.recoveredTaskIds);
+
+        for (const item of context.completedIterations) {
+            if (!knownTaskIds.has(item.id)) {
+                return {
+                    type: "blocked",
+                    reason:
+                        `Unknown completed iteration: ${item.id}`
+                };
+            }
+
+            completed.add(item.id);
+        }
 
         for (const task of this.graph.tasks) {
             if (completed.has(task.id)) {

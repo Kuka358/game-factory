@@ -1451,19 +1451,6 @@ export class AutonomyEngine {
                     attemptRecord.completedAt =
                         this.now();
 
-
-                    /*
-                     * Surgical application is transactional:
-                     *
-                     * validation failures mutate nothing and runtime
-                     * application failures are rolled back before the
-                     * error escapes. Therefore the same isolated
-                     * workspace is safe to reuse for the next model
-                     * attempt.
-                     */
-                    previousVerification =
-                        undefined;
-
                     repairInstructions = [
                         [
                             "The previous coding response could not be applied safely.",
